@@ -17,7 +17,7 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
                     if (job is null) return null;
                     job.Status = JobStatuses.Running;
                     job.StartedAt = DateTimeOffset.UtcNow;
-                    return new Job { Id = job.Id, ProjectId = job.ProjectId, LoopId = job.LoopId, ModelId = job.ModelId, Prompt = job.Prompt, ConversationId = job.ConversationId, AttachmentPaths = job.AttachmentPaths, PlanStepId = job.PlanStepId, PlanStepTitle = job.PlanStepTitle };
+                    return new Job { Id = job.Id, ProjectId = job.ProjectId, LoopId = job.LoopId, ModelId = job.ModelId, RequiredCapability = job.RequiredCapability, FailedModelIds = job.FailedModelIds.ToList(), Prompt = job.Prompt, ConversationId = job.ConversationId, AttachmentPaths = job.AttachmentPaths, PlanStepId = job.PlanStepId, PlanStepTitle = job.PlanStepTitle };
                 });
                 if (next is not null) await RunAsync(next, stoppingToken);
                 else await Task.Delay(1000, stoppingToken);
@@ -46,12 +46,12 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
                 continue;
             }
             var project = state.Projects.FirstOrDefault(x => x.Id == loop.ProjectId);
-            if (project?.DefaultModelId is null) continue;
+            if (project is null || !state.Models.Any(model => model.IsEnabled)) continue;
             var conversation = new Conversation { ProjectId = loop.ProjectId, Title = loop.Name };
             state.Conversations.Add(conversation);
             var job = new Job
             {
-                ProjectId = loop.ProjectId, LoopId = loop.Id, ModelId = project.DefaultModelId,
+                ProjectId = loop.ProjectId, LoopId = loop.Id, ModelId = project.DefaultModelId, RequiredCapability = AiCapabilities.Orchestrator,
                 Prompt = loop.Prompt, CreatedByUserId = Guid.Empty, CreatedAt = now, ConversationId = conversation.Id
             };
             state.Jobs.Add(job);
@@ -64,13 +64,21 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
 
     private async Task RunAsync(Job job, CancellationToken cancellationToken)
     {
+        var projectRoot = await workspace.ResolveProjectPathAsync(job.ProjectId, "");
+        var requiredCapability = string.IsNullOrWhiteSpace(job.RequiredCapability)
+            ? File.Exists(Path.Combine(projectRoot, "PLAN.md")) ? AiCapabilities.Coder : AiCapabilities.Planner
+            : job.RequiredCapability;
         var context = await store.ReadAsync(state =>
         {
             var project = state.Projects.FirstOrDefault(x => x.Id == job.ProjectId);
+            var excluded = job.FailedModelIds.ToHashSet();
+            var models = state.Models.Where(model => model.IsEnabled && !excluded.Contains(model.Id) && AiCapabilities.Supports(model, requiredCapability))
+                .OrderBy(model => model.Id == job.ModelId ? 0 : model.Id == project?.DefaultModelId ? 1 : 2)
+                .ThenBy(model => model.Priority).ThenBy(model => model.Name).ToList();
             return new
             {
                 Project = project,
-                Model = state.Models.FirstOrDefault(x => x.Id == job.ModelId && x.IsEnabled),
+                Models = models,
                 Conversation = state.Conversations.FirstOrDefault(x => x.Id == job.ConversationId),
                 RuntimeSettings = state.AgentRuntime.Settings,
                 ResultsTarget = project?.ResultsRepositoryId is long repositoryId
@@ -78,11 +86,13 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
                     : null
             };
         });
-        if (context.Project is null || context.Model is null)
+        var selectedModel = context.Models.FirstOrDefault();
+        if (context.Project is null || selectedModel is null)
         {
-            await FailAsync(job.Id, "Project or enabled remote model was not found.");
+            await FailAsync(job.Id, $"No enabled AI connection supports the {requiredCapability} capability.");
             return;
         }
+        await store.UpdateAsync(state => { var current = state.Jobs.First(item => item.Id == job.Id); current.ModelId = selectedModel.Id; current.RequiredCapability = requiredCapability; return true; });
         try
         {
             var assignedStep = await plans.PrepareJobAsync(job.ProjectId, job.Id, cancellationToken);
@@ -110,12 +120,12 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
             string output;
             if (context.RuntimeSettings.Enabled)
             {
-                runtimeResult = await runtime.RunAsync(context.Model, context.Project, job, messages, prompt, images, context.RuntimeSettings, cancellationToken);
+                runtimeResult = await runtime.RunAsync(selectedModel, context.Project, job, messages, prompt, images, context.RuntimeSettings, cancellationToken);
                 output = runtimeResult.Output;
                 await plans.SynchronizeFromWorkspaceAsync(job.ProjectId, cancellationToken);
                 if (runtimeResult.Outcome == AgentRunOutcomes.ChangesCompleted) await plans.CompleteJobAsync(job.Id, runtimeResult);
             }
-            else output = await client.CompleteAsync(context.Model, context.Project.SystemPrompt + "\n\nYou may create result files by returning fenced blocks in the form ```file:relative/path.ext followed by text content, or ```base64-file:relative/path.ext followed by base64 data. Source project files are read-only; all generated files are saved in a new result folder.", messages, prompt, images, cancellationToken);
+            else output = await client.CompleteAsync(selectedModel, context.Project.SystemPrompt + "\n\nYou may create result files by returning fenced blocks in the form ```file:relative/path.ext followed by text content, or ```base64-file:relative/path.ext followed by base64 data. Source project files are read-only; all generated files are saved in a new result folder.", messages, prompt, images, cancellationToken);
             var resultFolder = await workspace.CreateResultFolderAsync(job.ProjectId, job.Id);
             var resultItem = await workspace.WriteResultTextAsync(job.ProjectId, resultFolder, "response.md", output);
             var generatedItems = await workspace.WriteGeneratedFilesAsync(job.ProjectId, resultFolder, output);
@@ -180,9 +190,21 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
         catch (Exception ex)
         {
             await plans.FailJobAsync(job.Id, ex.Message);
-            await FailAsync(job.Id, ex.Message);
+            if (!await RetryWithNextModelAsync(job.Id, selectedModel, requiredCapability, ex.Message))
+                await FailAsync(job.Id, ex.Message);
         }
     }
+
+    private Task<bool> RetryWithNextModelAsync(Guid jobId, RemoteModel failedModel, string capability, string error) => store.UpdateAsync(state =>
+    {
+        var job = state.Jobs.First(item => item.Id == jobId);
+        if (!job.FailedModelIds.Contains(failedModel.Id)) job.FailedModelIds.Add(failedModel.Id);
+        var hasFallback = state.Models.Any(model => model.IsEnabled && !job.FailedModelIds.Contains(model.Id) && AiCapabilities.Supports(model, capability));
+        if (!hasFallback) return false;
+        job.Status = JobStatuses.Queued; job.StartedAt = null; job.CompletedAt = null; job.Error = ""; job.ModelId = null;
+        state.Messages.Add(new AppMessage { ProjectId = job.ProjectId, JobId = job.Id, Level = MessageLevels.Warning, Text = $"{failedModel.Name} failed: {error}. Retrying with the next {capability} connection." });
+        return true;
+    });
 
     private Task FailAsync(Guid id, string error) => store.UpdateAsync(state =>
     {

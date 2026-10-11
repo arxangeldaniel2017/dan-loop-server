@@ -11,6 +11,54 @@ document.querySelectorAll('.tab').forEach(button => {
 const initialTab = location.hash.slice(1);
 if (initialTab) document.querySelector(`.tab[data-tab="${CSS.escape(initialTab)}"]`)?.click();
 
+const aiCatalogNode = document.getElementById('ai-provider-catalog');
+let aiCatalog = [];
+try { aiCatalog = aiCatalogNode ? JSON.parse(aiCatalogNode.textContent) : []; } catch { aiCatalog = []; }
+document.querySelectorAll('[data-ai-connection-form]').forEach((form, formIndex) => {
+  const providerSelect = form.querySelector('[data-ai-provider]');
+  const baseUrl = form.querySelector('input[name="baseUrl"]');
+  const modelInput = form.querySelector('input[name="modelId"]');
+  let modelList = form.querySelector('datalist');
+  const links = form.querySelector('[data-provider-links]');
+  if (modelList && document.querySelectorAll(`#${CSS.escape(modelList.id)}`).length > 1) {
+    modelList.id = `${modelList.id}-${formIndex}`;
+    modelInput?.setAttribute('list', modelList.id);
+  }
+  const updateProvider = () => {
+    const provider = aiCatalog.find(item => item.id === providerSelect?.value);
+    if (!provider) return;
+    if (baseUrl) {
+      baseUrl.value = provider.baseUrl || baseUrl.value;
+      baseUrl.readOnly = !provider.requiresBaseUrl && Boolean(provider.baseUrl);
+      baseUrl.closest('label')?.classList.toggle('connection-field-fixed', baseUrl.readOnly);
+    }
+    if (modelList) modelList.innerHTML = (provider.models || []).map(model => `<option value="${String(model.id).replaceAll('&', '&amp;').replaceAll('"', '&quot;')}">${String(model.name).replaceAll('&', '&amp;').replaceAll('<', '&lt;')}</option>`).join('');
+    if (links) {
+      const items = [provider.apiKeyUrl && ['Get API key', provider.apiKeyUrl], provider.documentationUrl && ['Documentation', provider.documentationUrl], provider.pricingUrl && ['Pricing', provider.pricingUrl]].filter(Boolean);
+      links.innerHTML = items.map(([label, url]) => `<a href="${url}" target="_blank" rel="noopener">${label} ↗</a>`).join('');
+    }
+  };
+  providerSelect?.addEventListener('change', updateProvider);
+  updateProvider();
+});
+
+document.querySelectorAll('[data-model-capability]').forEach(checkbox => {
+  checkbox.addEventListener('change', async () => {
+    checkbox.disabled = true;
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    const body = new FormData(); body.append('id', checkbox.dataset.modelId); body.append('capability', checkbox.value); body.append('enabled', String(checkbox.checked));
+    if (token) body.append('__RequestVerificationToken', token);
+    try {
+      const response = await fetch('/Manage/SetModelCapability', { method: 'POST', body, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      if (!response.ok) throw new Error('Capability could not be saved.');
+      checkbox.closest('.capability-chip')?.classList.add('saved');
+      setTimeout(() => checkbox.closest('.capability-chip')?.classList.remove('saved'), 700);
+      checkbox.closest('.connection-card')?.querySelector('.capability-default')?.remove();
+    } catch (error) { checkbox.checked = !checkbox.checked; alert(error.message); }
+    finally { checkbox.disabled = false; }
+  });
+});
+
 document.addEventListener('click', event => {
   const button = event.target.closest('[data-disclosure-action]');
   if (!button) return;

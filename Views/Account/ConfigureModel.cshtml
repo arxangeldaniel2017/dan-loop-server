@@ -1,15 +1,27 @@
-@{ ViewData["Title"] = "Configure model"; }
+@using DanLoopServer.Models
+@{ ViewData["Title"] = "Configure AI connections"; var catalog = ViewBag.Catalog as List<AiProviderCatalogItem> ?? []; var existing = ViewBag.Models as List<RemoteModel> ?? []; }
 <div class="auth-wrap"><section class="auth-card wizard-card">
     <p class="eyebrow">FIRST RUN · STEP 2 OF 4</p>
-    <h1>Connect a model.</h1>
-    <p>Add an OpenAI-compatible endpoint now, or skip this step and configure one later.</p>
+    <h1>Connect AI.</h1>
+    <p>Add one or several AI connections and mark what each model should do. If nothing is selected, the predefined model capabilities are used.</p>
+    @if (existing.Any())
+    {
+        <div class="wizard-connections">
+            @foreach (var connection in existing) { <span class="pill">@(connection.Name) · @string.Join(", ", AiCapabilities.Effective(connection))</span> }
+        </div>
+    }
     <div asp-validation-summary="All" class="error"></div>
-    <form method="post">
-        <label>Display name<input name="name" value="@(Context.Request.HasFormContentType ? Context.Request.Form["name"] : "My Model")" required autofocus /></label>
-        <label>Model ID<input name="modelId" value="@(Context.Request.HasFormContentType ? Context.Request.Form["modelId"] : "")" required placeholder="e.g. llama3.2" /></label>
-        <label>Model URL<input name="baseUrl" value="@(Context.Request.HasFormContentType ? Context.Request.Form["baseUrl"] : "")" type="url" required placeholder="e.g. http://localhost:11434/v1" /></label>
+    <form method="post" data-ai-connection-form>
+        <label>Connection type<select name="providerId" data-ai-provider>@foreach (var provider in catalog) { <option value="@provider.Id" data-base-url="@provider.BaseUrl" data-docs="@provider.DocumentationUrl" data-key-url="@provider.ApiKeyUrl" data-pricing="@provider.PricingUrl">@provider.Name</option> }</select></label>
+        <label>Display name<input name="name" value="@(Context.Request.HasFormContentType ? Context.Request.Form["name"] : "My AI")" required autofocus /></label>
+        <label>Model ID<input name="modelId" list="wizard-model-list" required placeholder="Select or enter a model" /></label>
+        <datalist id="wizard-model-list"></datalist>
+        <label>Model URL<input name="baseUrl" value="@(Context.Request.HasFormContentType ? Context.Request.Form["baseUrl"] : catalog.FirstOrDefault()?.BaseUrl)" type="url" required /></label>
         <label>API key<input name="apiKey" type="password" autocomplete="off" placeholder="Optional for local models" /></label>
-        <button>Add model and continue →</button>
+        <fieldset class="capability-picker"><legend>Active capabilities</legend>@foreach (var capability in AiCapabilities.All) { <label class="check"><input type="checkbox" name="capabilities" value="@capability" /> @capability</label> }</fieldset>
+        <div class="provider-links" data-provider-links></div>
+        <div class="wizard-actions"><button name="addAnother" value="true">Add another</button><button class="secondary" name="addAnother" value="false">Add and continue →</button></div>
     </form>
+    <script type="application/json" id="ai-provider-catalog">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(catalog, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }))</script>
     <a class="wizard-skip" asp-controller="GitHub" asp-action="Setup">Skip for now</a>
 </section></div>

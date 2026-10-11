@@ -23,6 +23,25 @@ public sealed class RemoteModelClient(HttpClient http, IDataProtectionProvider p
         catch { return "unavailable"; }
     }
 
+    public async Task<string> TestAsync(RemoteModel model, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, model.BaseUrl.TrimEnd('/') + "/chat/completions");
+        if (!string.IsNullOrEmpty(model.ProtectedApiKey))
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _protector.Unprotect(model.ProtectedApiKey));
+        request.Content = JsonContent.Create(new
+        {
+            model = model.ModelId,
+            messages = new[] { new { role = "user", content = "Reply with OK." } },
+            max_tokens = 12,
+            stream = false
+        });
+        using var response = await http.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"HTTP {(int)response.StatusCode}: {body[..Math.Min(body.Length, 500)]}");
+        return "Connection and model request succeeded.";
+    }
+
     public async Task<string> CompleteAsync(RemoteModel model, string systemPrompt, IReadOnlyList<ConversationMessage> conversation, string currentPrompt, IReadOnlyList<string> imageDataUrls, CancellationToken cancellationToken)
     {
         var url = model.BaseUrl.TrimEnd('/') + "/chat/completions";

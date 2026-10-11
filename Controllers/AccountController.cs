@@ -35,10 +35,15 @@ public sealed class AccountController(StateStore store, PasswordService password
     }
 
     [Authorize(Roles = Roles.Admin), HttpGet]
-    public IActionResult ConfigureModel() => View();
+    public async Task<IActionResult> ConfigureModel()
+    {
+        ViewBag.Catalog = await store.ReadAsync(state => state.AiProviderCatalog);
+        ViewBag.Models = await store.ReadAsync(state => state.Models);
+        return View();
+    }
 
     [Authorize(Roles = Roles.Admin), HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> ConfigureModel(string? name, string? modelId, string? baseUrl, string? apiKey)
+    public async Task<IActionResult> ConfigureModel(string? name, string? modelId, string? baseUrl, string? apiKey, string? providerId, List<string>? capabilities, bool addAnother = false)
     {
         name = name?.Trim() ?? "";
         modelId = modelId?.Trim() ?? "";
@@ -48,21 +53,29 @@ public sealed class AccountController(StateStore store, PasswordService password
         if (string.IsNullOrWhiteSpace(modelId)) ModelState.AddModelError("", "Model ID is required.");
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             ModelState.AddModelError("", "A valid HTTP(S) model URL is required.");
-        if (!ModelState.IsValid) return View();
+        if (!ModelState.IsValid)
+        {
+            ViewBag.Catalog = await store.ReadAsync(state => state.AiProviderCatalog);
+            ViewBag.Models = await store.ReadAsync(state => state.Models);
+            return View();
+        }
 
         await store.UpdateAsync(state =>
         {
+            var provider = string.IsNullOrWhiteSpace(providerId) ? "custom" : providerId.Trim();
             state.Models.Add(new RemoteModel
             {
-                Name = name,
+                Name = name, ProviderId = provider,
                 ModelId = modelId,
                 BaseUrl = baseUrl.TrimEnd('/'),
                 ProtectedApiKey = modelClient.ProtectKey(apiKey ?? ""),
-                IsEnabled = true
+                IsEnabled = true,
+                Capabilities = (capabilities ?? []).Where(AiCapabilities.All.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                SuggestedCapabilities = AiConnectionCatalogService.SuggestedCapabilities(state.AiProviderCatalog, provider, modelId)
             });
             return true;
         });
-        return RedirectToAction("Setup", "GitHub");
+        return addAnother ? RedirectToAction(nameof(ConfigureModel)) : RedirectToAction("Setup", "GitHub");
     }
 
     [Authorize(Roles = Roles.Admin), HttpGet]

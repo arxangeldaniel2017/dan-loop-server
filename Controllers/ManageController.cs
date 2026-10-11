@@ -74,7 +74,7 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> RunJob(Guid projectId, string prompt, Guid? modelId, Guid? conversationId, List<string>? attachmentPaths)
+    public async Task<IActionResult> RunJob(Guid projectId, string prompt, Guid? modelId, string? requiredCapability, Guid? conversationId, List<string>? attachmentPaths)
     {
         if (!await CanAsync(projectId, run: true)) return Forbid();
         if (string.IsNullOrWhiteSpace(prompt)) return Back("Job prompt is required.");
@@ -88,7 +88,8 @@ public sealed class ManageController(StateStore store, PasswordService passwords
                 conversation = new Conversation { ProjectId = projectId, Title = prompt.Trim()[..Math.Min(prompt.Trim().Length, 80)] };
                 state.Conversations.Add(conversation);
             }
-            var job = new Job { ProjectId = projectId, Prompt = prompt.Trim(), ModelId = modelId ?? project.DefaultModelId, CreatedByUserId = userId, ConversationId = conversation.Id, AttachmentPaths = attachmentPaths?.Distinct().ToList() ?? [] };
+            var capability = AiCapabilities.All.Contains(requiredCapability ?? "") ? requiredCapability! : AiCapabilities.Orchestrator;
+            var job = new Job { ProjectId = projectId, Prompt = prompt.Trim(), ModelId = modelId ?? project.DefaultModelId, RequiredCapability = capability, CreatedByUserId = userId, ConversationId = conversation.Id, AttachmentPaths = attachmentPaths?.Distinct().ToList() ?? [] };
             state.Jobs.Add(job);
             conversation.Messages.Add(new ConversationMessage { JobId = job.Id, Role = "user", Content = job.Prompt, FilePaths = job.AttachmentPaths });
             conversation.UpdatedAt = DateTimeOffset.UtcNow;
@@ -205,18 +206,102 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
-    public async Task<IActionResult> CreateModel(string name, string baseUrl, string modelId, string apiKey, bool isEnabled = false)
+    public async Task<IActionResult> CreateModel(string name, string baseUrl, string modelId, string apiKey, string? providerId, List<string>? capabilities, int priority = 100, bool isEnabled = false)
     {
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return Back("A valid HTTP(S) base URL is required.");
-        await store.UpdateAsync(state => { state.Models.Add(new RemoteModel { Name = name.Trim(), BaseUrl = baseUrl.TrimEnd('/'), ModelId = modelId.Trim(), ProtectedApiKey = modelClient.ProtectKey(apiKey), IsEnabled = isEnabled }); return true; });
-        return Back("Remote model added.");
+        await store.UpdateAsync(state =>
+        {
+            var provider = string.IsNullOrWhiteSpace(providerId) ? "custom" : providerId.Trim();
+            var suggested = AiConnectionCatalogService.SuggestedCapabilities(state.AiProviderCatalog, provider, modelId.Trim());
+            state.Models.Add(new RemoteModel
+            {
+                Name = name.Trim(), ProviderId = provider, BaseUrl = baseUrl.TrimEnd('/'), ModelId = modelId.Trim(),
+                ProtectedApiKey = modelClient.ProtectKey(apiKey), IsEnabled = isEnabled, Priority = Math.Clamp(priority, 1, 999),
+                Capabilities = NormalizeCapabilities(capabilities), SuggestedCapabilities = suggested
+            });
+            return true;
+        });
+        return Connections("AI connection added.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> UpdateModel(Guid id, string name, string baseUrl, string modelId, string? apiKey, string? providerId, int priority = 100)
+    {
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return Connections("A valid HTTP(S) base URL is required.");
+        await store.UpdateAsync(state =>
+        {
+            var model = state.Models.First(item => item.Id == id);
+            model.Name = name.Trim(); model.ProviderId = providerId?.Trim() ?? "custom"; model.BaseUrl = baseUrl.TrimEnd('/');
+            model.ModelId = modelId.Trim(); model.Priority = Math.Clamp(priority, 1, 999);
+            if (!string.IsNullOrWhiteSpace(apiKey)) model.ProtectedApiKey = modelClient.ProtectKey(apiKey);
+            model.SuggestedCapabilities = AiConnectionCatalogService.SuggestedCapabilities(state.AiProviderCatalog, model.ProviderId, model.ModelId);
+            return true;
+        });
+        return Connections("AI connection updated.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> SetModelCapability(Guid id, string capability, bool enabled)
+    {
+        if (!AiCapabilities.All.Contains(capability)) return BadRequest(new { message = "Unknown capability." });
+        await store.UpdateAsync(state =>
+        {
+            var model = state.Models.First(item => item.Id == id);
+            var selected = model.Capabilities.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (enabled) selected.Add(capability); else selected.Remove(capability);
+            model.Capabilities = selected.Where(AiCapabilities.All.Contains).ToList();
+            return true;
+        });
+        return Request.Headers.XRequestedWith == "XMLHttpRequest" ? Ok(new { saved = true }) : Connections("Capability updated.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> ToggleModel(Guid id)
+    {
+        await store.UpdateAsync(state => { var model = state.Models.First(item => item.Id == id); model.IsEnabled = !model.IsEnabled; return true; });
+        return Connections("AI connection status updated.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> TestModel(Guid id, CancellationToken cancellationToken)
+    {
+        var model = await store.ReadAsync(state => state.Models.First(item => item.Id == id));
+        try
+        {
+            var message = await modelClient.TestAsync(model, cancellationToken);
+            await store.UpdateAsync(state => { var current = state.Models.First(item => item.Id == id); current.LastTestStatus = "Succeeded"; current.LastTestMessage = message; current.LastTestedAt = DateTimeOffset.UtcNow; return true; });
+            return Connections(message);
+        }
+        catch (Exception ex)
+        {
+            var message = ex.Message.Length > 500 ? ex.Message[..500] : ex.Message;
+            await store.UpdateAsync(state => { var current = state.Models.First(item => item.Id == id); current.LastTestStatus = "Failed"; current.LastTestMessage = message; current.LastTestedAt = DateTimeOffset.UtcNow; return true; });
+            return Connections("Test failed: " + message);
+        }
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> BulkModels(List<Guid>? selectedIds, string action)
+    {
+        var ids = (selectedIds ?? []).ToHashSet();
+        await store.UpdateAsync(state =>
+        {
+            if (action == "delete")
+            {
+                state.Models.RemoveAll(model => ids.Contains(model.Id));
+                foreach (var project in state.Projects.Where(project => project.DefaultModelId is Guid modelId && ids.Contains(modelId))) project.DefaultModelId = null;
+            }
+            else foreach (var model in state.Models.Where(model => ids.Contains(model.Id))) model.IsEnabled = action == "activate";
+            return true;
+        });
+        return Connections($"Updated {ids.Count} AI connection(s).");
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> DeleteModel(Guid id)
     {
         await store.UpdateAsync(state => { state.Models.RemoveAll(x => x.Id == id); foreach (var p in state.Projects.Where(x => x.DefaultModelId == id)) p.DefaultModelId = null; return true; });
-        return Back("Remote model deleted.");
+        return Connections("AI connection deleted.");
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
@@ -262,5 +347,9 @@ public sealed class ManageController(StateStore store, PasswordService passwords
         return await store.ReadAsync(s => s.Permissions.Any(x => x.UserId == id && x.ProjectId == projectId && (!manage || x.CanManage) && (!run || x.CanRun)));
     }
 
+    private static List<string> NormalizeCapabilities(IEnumerable<string>? capabilities) =>
+        (capabilities ?? []).Where(AiCapabilities.All.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private IActionResult Connections(string message) { TempData["Message"] = message; return Redirect("/#connections"); }
     private IActionResult Back(string message) { TempData["Message"] = message; return RedirectToAction("Index", "Home"); }
 }
