@@ -1,0 +1,99 @@
+@model DashboardViewModel
+@{
+    ViewData["Title"] = "Dashboard";
+    bool CanManage(Guid projectId) => Model.IsAdmin || Model.State.Permissions.Any(x => x.UserId == Model.CurrentUserId && x.ProjectId == projectId && x.CanManage);
+    bool CanRun(Guid projectId) => Model.IsAdmin || Model.State.Permissions.Any(x => x.UserId == Model.CurrentUserId && x.ProjectId == projectId && x.CanRun);
+}
+
+<section class="hero">
+    <div><p class="eyebrow">ORCHESTRATION CONTROL PLANE</p><h1>Loops that keep moving.</h1><p>Manage prompts, recurring work, remote models and access from one local dashboard.</p></div>
+    <div class="metrics"><div><strong>@Model.VisibleProjects.Count</strong><span>projects</span></div><div><strong>@Model.State.Loops.Count(x => x.IsEnabled)</strong><span>live loops</span></div><div><strong>@Model.State.Jobs.Count(x => x.Status == JobStatuses.Running || x.Status == JobStatuses.Queued)</strong><span>active jobs</span></div></div>
+</section>
+
+@if (TempData["Message"] is string message) { <div class="notice">@message</div> }
+
+<nav class="tabs">
+    <button class="tab active" data-tab="projects">Projects</button><button class="tab" data-tab="jobs">Jobs</button>
+    @if (Model.IsAdmin) { <button class="tab" data-tab="models">Models</button><button class="tab" data-tab="access">Access</button> }
+</nav>
+
+<section id="projects" class="panel tab-panel active">
+    @if (Model.IsAdmin)
+    {
+        <details class="create-box"><summary>＋ New project</summary>
+            <form asp-controller="Manage" asp-action="CreateProject" method="post" class="form-grid">
+                <label>Name<input name="name" required maxlength="100" /></label>
+                <label>Default model<select name="defaultModelId"><option value="">None</option>@foreach (var m in Model.State.Models.Where(x => x.IsEnabled)) { <option value="@m.Id">@m.Name</option> }</select></label>
+                <label class="wide">Description<input name="description" maxlength="500" /></label>
+                <label class="wide">Project system prompt<textarea name="systemPrompt" rows="4" placeholder="Instructions applied to every job in this project"></textarea></label>
+                <button>Create project</button>
+            </form>
+        </details>
+    }
+    @if (!Model.VisibleProjects.Any()) { <div class="empty">No projects are available yet.</div> }
+    @foreach (var project in Model.VisibleProjects)
+    {
+        var loops = Model.State.Loops.Where(x => x.ProjectId == project.Id).ToList();
+        <article class="project-card">
+            <div class="project-head"><div><span class="dot"></span><h2>@project.Name</h2><p>@project.Description</p></div><span class="pill">@loops.Count loops</span></div>
+            @if (CanManage(project.Id))
+            {
+                <details><summary>Edit project & prompt</summary>
+                    <form asp-controller="Manage" asp-action="UpdateProject" method="post" class="form-grid compact"><input type="hidden" name="id" value="@project.Id" />
+                        <label>Name<input name="name" value="@project.Name" required /></label><label>Default model<select name="defaultModelId"><option value="">None</option>@foreach (var m in Model.State.Models.Where(x => x.IsEnabled)) { <option value="@m.Id" selected="@(m.Id == project.DefaultModelId)">@m.Name</option> }</select></label>
+                        <label class="wide">Description<input name="description" value="@project.Description" /></label><label class="wide">System prompt<textarea name="systemPrompt" rows="4">@project.SystemPrompt</textarea></label><button>Save changes</button>
+                    </form>
+                </details>
+                <details><summary>Add recurring loop</summary>
+                    <form asp-controller="Manage" asp-action="CreateLoop" method="post" class="form-grid compact"><input type="hidden" name="projectId" value="@project.Id" />
+                        <label>Name<input name="name" required /></label><label>Every (seconds)<input name="intervalSeconds" type="number" min="10" value="300" required /></label><label class="wide">Loop prompt<textarea name="prompt" rows="3" required></textarea></label><label class="check"><input type="checkbox" name="isEnabled" value="true" /> Enable now</label><button>Add loop</button>
+                    </form>
+                </details>
+            }
+            <div class="loop-list">
+                @foreach (var loop in loops)
+                {
+                    <div class="loop-row"><div><span class="status @(loop.IsEnabled ? "online" : "")"></span><strong>@loop.Name</strong><small>every @loop.IntervalSeconds sec · @(loop.LastQueuedAt?.ToLocalTime().ToString("g") ?? "not run")</small><p>@loop.Prompt</p></div>
+                        @if (CanManage(project.Id)) { <div class="actions"><form asp-controller="Manage" asp-action="ToggleLoop" method="post"><input type="hidden" name="id" value="@loop.Id"/><button class="secondary">@(loop.IsEnabled ? "Pause" : "Enable")</button></form><form asp-controller="Manage" asp-action="DeleteLoop" method="post" onsubmit="return confirm('Delete this loop?')"><input type="hidden" name="id" value="@loop.Id"/><button class="danger">Delete</button></form></div> }
+                    </div>
+                }
+            </div>
+            @if (CanRun(project.Id))
+            {
+                <form asp-controller="Manage" asp-action="RunJob" method="post" class="run-box"><input type="hidden" name="projectId" value="@project.Id"/><textarea name="prompt" rows="2" required placeholder="Enter a one-off job prompt…"></textarea><select name="modelId"><option value="">Project default</option>@foreach (var m in Model.State.Models.Where(x => x.IsEnabled)) { <option value="@m.Id">@m.Name</option> }</select><button>Run job →</button></form>
+            }
+            @if (Model.IsAdmin) { <form asp-controller="Manage" asp-action="DeleteProject" method="post" class="delete-project" onsubmit="return confirm('Delete this project and all its data?')"><input type="hidden" name="id" value="@project.Id"/><button class="link-danger">Delete project</button></form> }
+        </article>
+    }
+</section>
+
+<section id="jobs" class="panel tab-panel">
+    <div class="section-title"><div><p class="eyebrow">EXECUTION HISTORY</p><h2>Jobs</h2></div></div>
+    <div class="table-wrap"><table><thead><tr><th>Status</th><th>Project</th><th>Prompt / result</th><th>Created</th><th></th></tr></thead><tbody>
+    @foreach (var job in Model.State.Jobs.Where(j => Model.VisibleProjects.Any(p => p.Id == j.ProjectId)).OrderByDescending(x => x.CreatedAt).Take(100))
+    {
+        var project = Model.State.Projects.FirstOrDefault(x => x.Id == job.ProjectId);
+        <tr><td><span class="badge @job.Status.ToLowerInvariant()">@job.Status</span></td><td>@project?.Name</td><td><strong>@job.Prompt</strong>@if (!string.IsNullOrEmpty(job.Output)) { <details><summary>View output</summary><pre>@job.Output</pre></details> }@if (!string.IsNullOrEmpty(job.Error)) { <p class="error">@job.Error</p> }</td><td>@job.CreatedAt.ToLocalTime().ToString("g")</td><td class="actions">@if (job.Status is JobStatuses.Queued or JobStatuses.Running) { <form asp-controller="Manage" asp-action="CancelJob" method="post"><input type="hidden" name="id" value="@job.Id"/><button class="secondary">Cancel</button></form> }@if (Model.IsAdmin && job.Status != JobStatuses.Running) { <form asp-controller="Manage" asp-action="DeleteJob" method="post"><input type="hidden" name="id" value="@job.Id"/><button class="link-danger">Remove</button></form> }</td></tr>
+    }
+    </tbody></table></div>
+</section>
+
+@if (Model.IsAdmin)
+{
+<section id="models" class="panel tab-panel">
+    <div class="section-title"><div><p class="eyebrow">OPENAI-COMPATIBLE ENDPOINTS</p><h2>Remote models</h2></div></div>
+    <form asp-controller="Manage" asp-action="CreateModel" method="post" class="form-grid create-box open"><label>Display name<input name="name" required placeholder="Local Ollama" /></label><label>Model ID<input name="modelId" required placeholder="llama3.2" /></label><label class="wide">Base URL<input name="baseUrl" type="url" required placeholder="http://host.docker.internal:11434/v1" /></label><label class="wide">API key<input name="apiKey" type="password" autocomplete="off" placeholder="Optional for local models" /></label><label class="check"><input type="checkbox" name="isEnabled" value="true" checked /> Enabled</label><button>Add remote model</button></form>
+    <div class="cards">@foreach (var m in Model.State.Models) { <div class="mini-card"><span class="status @(m.IsEnabled ? "online" : "")"></span><strong>@m.Name</strong><code>@m.ModelId</code><small>@m.BaseUrl</small><form asp-controller="Manage" asp-action="DeleteModel" method="post" onsubmit="return confirm('Delete this model?')"><input type="hidden" name="id" value="@m.Id"/><button class="link-danger">Delete</button></form></div> }</div>
+</section>
+
+<section id="access" class="panel tab-panel">
+    <div class="section-title"><div><p class="eyebrow">USERS & PERMISSIONS</p><h2>Access control</h2></div></div>
+    <form asp-controller="Manage" asp-action="CreateUser" method="post" class="form-grid create-box open"><label>Username<input name="username" required /></label><label>Password<input name="password" type="password" minlength="10" required /></label><label>Role<select name="role"><option value="Member">Member</option><option value="Admin">Admin</option></select></label><button>Create user</button></form>
+    @foreach (var user in Model.State.Users)
+    {
+        <article class="user-card"><div class="user-head"><div><strong>@user.Username</strong><span class="pill">@user.Role · @(user.IsEnabled ? "enabled" : "disabled")</span></div>@if (user.Id != Model.CurrentUserId) { <form asp-controller="Manage" asp-action="ToggleUser" method="post"><input type="hidden" name="id" value="@user.Id"/><button class="secondary">@(user.IsEnabled ? "Disable" : "Enable")</button></form> }</div>
+        @if (user.Role != Roles.Admin) { <div class="permissions">@foreach (var project in Model.State.Projects) { var permission = Model.State.Permissions.FirstOrDefault(x => x.UserId == user.Id && x.ProjectId == project.Id); <form asp-controller="Manage" asp-action="SetPermission" method="post"><input type="hidden" name="userId" value="@user.Id"/><input type="hidden" name="projectId" value="@project.Id"/><strong>@project.Name</strong><label class="check"><input type="checkbox" name="canView" value="true" checked="@(permission?.CanView == true)"/> View</label><label class="check"><input type="checkbox" name="canManage" value="true" checked="@(permission?.CanManage == true)"/> Manage</label><label class="check"><input type="checkbox" name="canRun" value="true" checked="@(permission?.CanRun == true)"/> Run</label><button class="secondary">Save</button></form> }</div> }
+        </article>
+    }
+</section>
+}

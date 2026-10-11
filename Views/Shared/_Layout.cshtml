@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] · dan-loop-server</title>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" href="/">dan<span>loop</span></a>
+        @if (User.Identity?.IsAuthenticated == true)
+        {
+            <div class="account"><span>@User.Identity.Name</span><form asp-controller="Account" asp-action="Logout" method="post"><button class="link-button">Sign out</button></form></div>
+        }
+    </header>
+    <main class="shell">@RenderBody()</main>
+    <footer>dan-loop-server · local orchestration control plane</footer>
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

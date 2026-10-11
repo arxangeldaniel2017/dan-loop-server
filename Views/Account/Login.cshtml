@@ -1,0 +1,2 @@
+@{ ViewData["Title"] = "Sign in"; }
+<div class="auth-wrap"><section class="auth-card"><p class="eyebrow">DAN LOOP</p><h1>Welcome back.</h1><p>Sign in to manage your loops and jobs.</p><div asp-validation-summary="All" class="error"></div><form method="post"><input type="hidden" name="returnUrl" value="@ViewBag.ReturnUrl"/><label>Username<input name="username" required autofocus /></label><label>Password<input name="password" type="password" required /></label><button>Sign in →</button></form></section></div>

@@ -1,0 +1,16 @@
+services:
+  dan-loop-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dan-loop-server
+    ports:
+      - "8080:8080"
+    volumes:
+      - dan-loop-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  dan-loop-data:
