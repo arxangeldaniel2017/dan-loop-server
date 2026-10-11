@@ -18,6 +18,11 @@ public sealed class HomeController(StateStore store, WorkspaceService workspace)
     public async Task<IActionResult> JobsPartial()
         => PartialView("_JobsList", await BuildDashboardAsync(includeProjectFiles: false));
 
+    [HttpGet, Authorize(Roles = Roles.Admin)]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+    public async Task<IActionResult> ToolAuditPartial()
+        => PartialView("_ToolAuditList", await BuildDashboardAsync(includeProjectFiles: false));
+
     private async Task<DashboardViewModel> BuildDashboardAsync(bool includeProjectFiles)
     {
         var userId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);

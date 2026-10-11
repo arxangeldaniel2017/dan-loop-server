@@ -45,6 +45,15 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
             if (!string.IsNullOrWhiteSpace(json))
             {
                 _state = JsonSerializer.Deserialize<AppState>(json, JsonOptions()) ?? new();
+                if (_state.Version < 2)
+                {
+                    _state.AgentRuntime.Settings.AllowGitPush = true;
+                    if (_state.AgentRuntime.Settings.MaxOutputTokens <= 2048) _state.AgentRuntime.Settings.MaxOutputTokens = 8192;
+                    _state.AgentRuntime.Settings.AllowedCommands = _state.AgentRuntime.Settings.AllowedCommands
+                        .Concat(AgentCommandCatalog.DefaultCommands).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                    _state.Version = 2;
+                    await SaveUnsafeAsync();
+                }
                 return;
             }
 

@@ -1,0 +1,48 @@
+@model DashboardViewModel
+@{
+    var settings = Model.State.AgentRuntime.Settings;
+    var catalogNames = AgentCommandCatalog.Options.Select(option => option.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var customCommands = settings.AllowedCommands.Where(command => !catalogNames.Contains(command)).ToList();
+    bool IsInstalled(string command)
+    {
+        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        return path.Split(System.IO.Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).Any(folder => File.Exists(System.IO.Path.Combine(folder, command)));
+    }
+}
+<div class="section-title"><div><p class="eyebrow">ADVANCED CONFIGURATION</p><h2>Tool configuration <span class="advanced-badge">Advanced</span></h2><p class="muted">Secure defaults are already active. Most users do not need to change these settings.</p></div><form asp-controller="AgentRuntime" asp-action="RestoreDefaults" method="post"><button class="secondary">Restore secure defaults</button></form></div>
+<div class="runtime-defaults"><strong>Default behavior</strong><span>Read and edit project files</span><span>Run approved builds and tests</span><span>Create local Git commits</span><span>Allow normal Git pushes</span><span class="blocked">Block force operations, destructive commands, secrets, and paths outside the workspace</span></div>
+<details class="create-box runtime-settings"><summary>Edit advanced runtime policy</summary>
+    <form asp-controller="AgentRuntime" asp-action="Update" method="post" class="form-grid compact">
+        <label class="check"><input type="checkbox" name="enabled" value="true" checked="@settings.Enabled"/> Enable agent tool runtime</label>
+        <label class="check"><input type="checkbox" name="useStreaming" value="true" checked="@settings.UseStreaming"/> Stream model responses</label>
+        <label class="check"><input type="checkbox" name="allowFileRead" value="true" checked="@settings.AllowFileRead"/> Read workspace files</label>
+        <label class="check"><input type="checkbox" name="allowFileWrite" value="true" checked="@settings.AllowFileWrite"/> Edit workspace files</label>
+        <label class="check"><input type="checkbox" name="allowCommands" value="true" checked="@settings.AllowCommands"/> Run approved commands</label>
+        <label class="check"><input type="checkbox" name="allowGitCommit" value="true" checked="@settings.AllowGitCommit"/> Create local Git commits</label>
+        <label class="check"><input type="checkbox" name="allowGitPush" value="true" checked="@settings.AllowGitPush"/> Allow normal Git pushes</label>
+        <label>Maximum agent steps<input type="number" name="maxSteps" min="1" max="50" value="@settings.MaxSteps"/></label>
+        <label>Maximum output tokens<input type="number" name="maxOutputTokens" min="32" max="32768" value="@settings.MaxOutputTokens"/><small class="field-help">Maximum text the model may return in each reasoning/tool step. It does not limit prompt size or the number of steps. Higher values help with long code and reports, but take longer to generate.</small></label>
+        <label>Command timeout (seconds)<input type="number" name="commandTimeoutSeconds" min="5" max="600" value="@settings.CommandTimeoutSeconds"/></label>
+        <label>Tool output limit (characters)<input type="number" name="maxToolOutputCharacters" min="1000" max="100000" value="@settings.MaxToolOutputCharacters"/></label>
+        <fieldset class="wide command-manager">
+            <legend>Allowed command manager</legend>
+            <p class="form-help">Select a command to add it; deselect it to remove it. “Power tool” commands can run project code, install dependencies, access networks, or control external systems.</p>
+            @foreach (var group in AgentCommandCatalog.Options.GroupBy(option => option.Category))
+            {
+                <section class="command-category"><h4>@group.Key</h4><div class="command-options">
+                    @foreach (var option in group)
+                    {
+                        var selected = settings.AllowedCommands.Contains(option.Name, StringComparer.OrdinalIgnoreCase);
+                        var installed = IsInstalled(option.Name);
+                        <label class="command-option @(option.IsPowerTool ? "power" : "")"><input type="checkbox" name="allowedCommands" value="@option.Name" checked="@selected"/><span><strong>@option.Name</strong><small>@option.Description</small></span><em class="@(installed ? "installed" : "unavailable")">@(installed ? "Installed" : "Not found")</em>@if (option.IsPowerTool) { <b>Power tool</b> }</label>
+                    }
+                </div></section>
+            }
+            <label class="custom-commands">Custom command names<textarea name="customCommands" rows="2" placeholder="One executable name per line">@string.Join("\n", customCommands)</textarea><small class="field-help">Custom entries are advanced. Paths are removed; permanently blocked command names remain blocked.</small></label>
+        </fieldset>
+        <p class="wide form-help">Git init, status, diff, log, show, branch, ls-files, grep, remote and tag are supported. Commits and normal pushes follow the switches above. Force pushes, destructive Git operations, shell substitutions, redirections, internal folders, and paths outside the project workspace remain blocked.</p>
+        <button>Save advanced configuration</button>
+    </form>
+</details>
+<div class="section-title runtime-audit-title"><div><p class="eyebrow">LIVE AUDIT TRAIL</p><h3>Recent tool activity</h3></div><form asp-controller="AgentRuntime" asp-action="ClearAudit" method="post" onsubmit="return confirm('Clear the tool activity history?')"><button class="link-danger">Clear activity</button></form></div>
+<div id="tool-audit-list" data-tool-audit-url="@Url.Action("ToolAuditPartial", "Home")">@await Html.PartialAsync("_ToolAuditList", Model)</div>

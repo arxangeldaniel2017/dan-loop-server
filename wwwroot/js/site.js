@@ -115,8 +115,28 @@ async function refreshJobs() {
 document.querySelector('.tab[data-tab="jobs"]')?.addEventListener('click', refreshJobs);
 if (jobsHost) { updateJobsPage(); updateSmartTimes(); setInterval(refreshJobs, 3000); setInterval(updateSmartTimes, 10000); }
 
-const fileManager = document.querySelector('[data-file-manager]');
-if (fileManager) {
+const toolAuditHost = document.getElementById('tool-audit-list');
+if (toolAuditHost) {
+  let toolAuditRefreshing = false;
+  setInterval(async () => {
+    if (toolAuditRefreshing || document.visibilityState !== 'visible') return;
+    toolAuditRefreshing = true;
+    try {
+      const response = await fetch(toolAuditHost.dataset.toolAuditUrl, { credentials: 'same-origin', cache: 'no-store' });
+      if (!response.ok || response.redirected) return;
+      const html = await response.text();
+      const next = document.createElement('div');
+      next.innerHTML = html;
+      const currentVersion = toolAuditHost.querySelector('[data-tool-audit-version]')?.dataset.toolAuditVersion;
+      const nextVersion = next.querySelector('[data-tool-audit-version]')?.dataset.toolAuditVersion;
+      if (currentVersion !== nextVersion) toolAuditHost.innerHTML = html;
+    } catch {
+      // Keep the current audit visible while the server restarts or is temporarily unavailable.
+    } finally { toolAuditRefreshing = false; }
+  }, 3000);
+}
+
+function initializeFileManager(fileManager) {
   const browser = fileManager.querySelector('[data-file-browser]');
   const items = [...fileManager.querySelectorAll('[data-file-item]')];
   const checkboxes = [...fileManager.querySelectorAll('[data-file-checkbox]')];
@@ -162,4 +182,38 @@ if (fileManager) {
   search.addEventListener('input', filterFiles);
   setView(localStorage.getItem('dan-loop-file-view') === 'list' ? 'list' : 'grid');
   updateSelection();
+}
+
+const fileBrowserHost = document.getElementById('file-browser-host');
+if (fileBrowserHost) {
+  let fileNavigationRunning = false;
+  const loadFolder = async (url, addHistory = true) => {
+    if (fileNavigationRunning) return;
+    fileNavigationRunning = true;
+    const scrollPosition = window.scrollY;
+    try {
+      const destination = new URL(url, location.href);
+      const path = destination.searchParams.get('path') || '';
+      const partial = new URL(fileBrowserHost.dataset.fileBrowserUrl, location.origin);
+      partial.searchParams.set('projectId', fileBrowserHost.dataset.projectId);
+      if (path) partial.searchParams.set('path', path);
+      const response = await fetch(partial, { credentials: 'same-origin', cache: 'no-store' });
+      if (!response.ok || response.redirected) return;
+      fileBrowserHost.innerHTML = await response.text();
+      document.querySelector('[data-workspace-path]').textContent = `/${path}`;
+      initializeFileManager(fileBrowserHost.querySelector('[data-file-manager]'));
+      if (addHistory) history.pushState({ filePath: path }, '', destination);
+      window.scrollTo(0, scrollPosition);
+    } finally { fileNavigationRunning = false; }
+  };
+  fileBrowserHost.addEventListener('click', event => {
+    const link = event.target.closest('a[data-file-nav]');
+    if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    loadFolder(link.href);
+  });
+  window.addEventListener('popstate', () => {
+    if (location.pathname.toLowerCase().startsWith('/files')) loadFolder(location.href, false);
+  });
+  initializeFileManager(fileBrowserHost.querySelector('[data-file-manager]'));
 }

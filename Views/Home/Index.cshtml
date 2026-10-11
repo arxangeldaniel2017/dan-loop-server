@@ -15,7 +15,7 @@
 
 <nav class="tabs">
     <button class="tab active" data-tab="projects">Projects</button><button class="tab" data-tab="files">Folders & files</button><button class="tab" data-tab="jobs">Jobs</button><button class="tab" data-tab="messages">Messages</button>
-    @if (Model.IsAdmin) { <button class="tab" data-tab="models">Models</button><button class="tab" data-tab="github">GitHub</button><button class="tab" data-tab="access">Access</button> }
+    @if (Model.IsAdmin) { <button class="tab advanced-tab" data-tab="tools">Tool configuration <small>Advanced</small></button><button class="tab" data-tab="models">Models</button><button class="tab" data-tab="github">GitHub</button><button class="tab" data-tab="access">Access</button> }
 </nav>
 
 <section id="projects" class="panel tab-panel active">
@@ -101,6 +101,10 @@
 
 @if (Model.IsAdmin)
 {
+<section id="tools" class="panel tab-panel">
+    @await Html.PartialAsync("_ToolConfiguration", Model)
+</section>
+
 <section id="models" class="panel tab-panel">
     <div class="section-title"><div><p class="eyebrow">OPENAI-COMPATIBLE ENDPOINTS</p><h2>Remote models</h2></div></div>
     <form asp-controller="Manage" asp-action="CreateModel" method="post" class="form-grid create-box open"><label>Display name<input name="name" required placeholder="Local Ollama" /></label><label>Model ID<input name="modelId" required placeholder="llama3.2" /></label><label class="wide">Base URL<input name="baseUrl" type="url" required placeholder="http://host.docker.internal:11434/v1" /></label><label class="wide">API key<input name="apiKey" type="password" autocomplete="off" placeholder="Optional for local models" /></label><label class="check"><input type="checkbox" name="isEnabled" value="true" checked /> Enabled</label><button>Add remote model</button></form>

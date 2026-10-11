@@ -14,6 +14,7 @@ public sealed class AppState
     public List<Conversation> Conversations { get; set; } = [];
     public List<PendingUpload> PendingUploads { get; set; } = [];
     public List<AppMessage> Messages { get; set; } = [];
+    public AgentRuntimeState AgentRuntime { get; set; } = new();
 }
 
 public sealed class AppUser

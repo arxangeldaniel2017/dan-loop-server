@@ -1,0 +1,18 @@
+@model DashboardViewModel
+@{
+    var audits = Model.State.AgentRuntime.AuditTrail.OrderByDescending(item => item.StartedAt).Take(100).ToList();
+    var version = string.Join('|', audits.Select(item => $"{item.Id:N}:{item.Status}:{item.CompletedAt?.ToUnixTimeMilliseconds()}"));
+}
+<div data-tool-audit-version="@version">
+    @if (!audits.Any()) { <div class="empty">No agent tools have run yet.</div> }
+    else
+    {
+        <div class="runtime-audit-list">
+            @foreach (var item in audits)
+            {
+                var project = Model.State.Projects.FirstOrDefault(project => project.Id == item.ProjectId);
+                <details class="runtime-audit-item"><summary><span class="badge @item.Status.ToLowerInvariant()">@item.Status</span><strong>@item.Tool</strong><span>@(project?.Name ?? "Unknown project") · step @item.Step</span><time>@item.StartedAt.ToLocalTime().ToString("g")</time></summary><div><p>@item.Summary</p><pre>@item.Output</pre></div></details>
+            }
+        </div>
+    }
+</div>

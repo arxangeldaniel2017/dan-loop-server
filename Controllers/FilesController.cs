@@ -20,6 +20,17 @@ public sealed class FilesController(StateStore store, WorkspaceService workspace
         catch (InvalidOperationException) { return BadRequest(); }
     }
 
+    [HttpGet]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+    public async Task<IActionResult> BrowsePartial(Guid projectId, string? path = null)
+    {
+        var project = await GetProjectAsync(projectId, manage: false);
+        if (project is null) return Forbid();
+        try { return PartialView("_FileBrowser", await workspace.BuildViewAsync(project, path)); }
+        catch (DirectoryNotFoundException) { return NotFound(); }
+        catch (InvalidOperationException) { return BadRequest(); }
+    }
+
     [HttpPost, ValidateAntiForgeryToken, RequestSizeLimit(262_144_000)]
     public async Task<IActionResult> Upload(Guid projectId, List<IFormFile> files)
     {

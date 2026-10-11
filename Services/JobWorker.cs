@@ -2,7 +2,7 @@ using DanLoopServer.Models;
 
 namespace DanLoopServer.Services;
 
-public sealed class JobWorker(StateStore store, RemoteModelClient client, WorkspaceService workspace, GitHubService gitHub, ILogger<JobWorker> logger) : BackgroundService
+public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentRuntimeService runtime, WorkspaceService workspace, GitHubService gitHub, ILogger<JobWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -72,6 +72,7 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, Worksp
                 Project = project,
                 Model = state.Models.FirstOrDefault(x => x.Id == job.ModelId && x.IsEnabled),
                 Conversation = state.Conversations.FirstOrDefault(x => x.Id == job.ConversationId),
+                RuntimeSettings = state.AgentRuntime.Settings,
                 ResultsTarget = project?.ResultsRepositoryId is long repositoryId
                     ? state.GitHubConnections.SelectMany(connection => connection.Repositories.Select(repository => new { Connection = connection, Repository = repository })).FirstOrDefault(x => x.Repository.Id == repositoryId)
                     : null
@@ -103,8 +104,9 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, Worksp
                 foreach (var path in message.FilePaths) fileContext.Add(await workspace.ReadAttachmentAsync(job.ProjectId, path));
                 message.Content += "\n\nPROJECT FILES PROVIDED FOR THIS MESSAGE:\n" + string.Join("\n\n", fileContext);
             }
-            var systemPrompt = context.Project.SystemPrompt + "\n\nYou may create result files by returning fenced blocks in the form ```file:relative/path.ext followed by text content, or ```base64-file:relative/path.ext followed by base64 data. Source project files are read-only; all generated files are saved in a new result folder.";
-            var output = await client.CompleteAsync(context.Model, systemPrompt, messages, prompt, images, cancellationToken);
+            var output = context.RuntimeSettings.Enabled
+                ? (await runtime.RunAsync(context.Model, context.Project, job, messages, prompt, images, context.RuntimeSettings, cancellationToken)).Output
+                : await client.CompleteAsync(context.Model, context.Project.SystemPrompt + "\n\nYou may create result files by returning fenced blocks in the form ```file:relative/path.ext followed by text content, or ```base64-file:relative/path.ext followed by base64 data. Source project files are read-only; all generated files are saved in a new result folder.", messages, prompt, images, cancellationToken);
             var resultFolder = await workspace.CreateResultFolderAsync(job.ProjectId, job.Id);
             var resultItem = await workspace.WriteResultTextAsync(job.ProjectId, resultFolder, "response.md", output);
             var generatedItems = await workspace.WriteGeneratedFilesAsync(job.ProjectId, resultFolder, output);
