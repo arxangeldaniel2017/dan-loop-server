@@ -1,0 +1,15 @@
+@{ ViewData["Title"] = "Configure model"; }
+<div class="auth-wrap"><section class="auth-card wizard-card">
+    <p class="eyebrow">FIRST RUN · STEP 2 OF 3</p>
+    <h1>Connect a model.</h1>
+    <p>Add an OpenAI-compatible endpoint now, or skip this step and configure one later.</p>
+    <div asp-validation-summary="All" class="error"></div>
+    <form method="post">
+        <label>Display name<input name="name" value="@(Context.Request.HasFormContentType ? Context.Request.Form["name"] : "My Model")" required autofocus /></label>
+        <label>Model ID<input name="modelId" value="@(Context.Request.HasFormContentType ? Context.Request.Form["modelId"] : "")" required placeholder="e.g. llama3.2" /></label>
+        <label>Model URL<input name="baseUrl" value="@(Context.Request.HasFormContentType ? Context.Request.Form["baseUrl"] : "")" type="url" required placeholder="e.g. http://localhost:11434/v1" /></label>
+        <label>API key<input name="apiKey" type="password" autocomplete="off" placeholder="Optional for local models" /></label>
+        <button>Add model and continue →</button>
+    </form>
+    <a class="wizard-skip" asp-action="CreateProject">Skip for now</a>
+</section></div>

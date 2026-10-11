@@ -8,7 +8,15 @@ Local, Docker-first ASP.NET Core control plane for projects, prompts, recurring 
 docker compose up --build
 ```
 
-Open <http://localhost:8080>. On first visit, create the administrator username and password. Application state, encryption keys and encrypted remote-model credentials persist in the `dan-loop-data` Docker volume.
+Open <http://localhost:8080>. On first visit, create the administrator account, then optionally configure a model and create a project in the setup wizard. Application state, encryption keys and encrypted remote-model credentials persist in the `dan-loop-data` Docker volume.
+
+When no managed database is configured, the server automatically creates a local SQLite database at `data/dan-loop.db` (or `/data/dan-loop.db` in Docker). Existing `state.json` data is imported automatically when the database is first created.
+
+To use managed PostgreSQL, set one of these application-platform variables:
+
+- `DATABASE_URL` (a `postgres://` or `postgresql://` URL)
+- `ConnectionStrings__DefaultConnection` (an Npgsql connection string)
+- `DATABASE_CONNECTION_STRING` or `DB_CONNECTION_STRING`
 
 To stop the server:
 

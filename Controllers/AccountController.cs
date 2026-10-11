@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace DanLoopServer.Controllers;
 
-public sealed class AccountController(StateStore store, PasswordService passwords) : Controller
+public sealed class AccountController(StateStore store, PasswordService passwords, RemoteModelClient modelClient) : Controller
 {
     [AllowAnonymous, HttpGet]
     public IActionResult Setup() => store.IsSetup ? RedirectToAction(nameof(Login)) : View();
@@ -31,6 +31,72 @@ public sealed class AccountController(StateStore store, PasswordService password
         });
         if (user is null) return RedirectToAction(nameof(Login));
         await SignInAsync(user);
+        return RedirectToAction(nameof(ConfigureModel));
+    }
+
+    [Authorize(Roles = Roles.Admin), HttpGet]
+    public IActionResult ConfigureModel() => View();
+
+    [Authorize(Roles = Roles.Admin), HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> ConfigureModel(string? name, string? modelId, string? baseUrl, string? apiKey)
+    {
+        name = name?.Trim() ?? "";
+        modelId = modelId?.Trim() ?? "";
+        baseUrl = baseUrl?.Trim() ?? "";
+
+        if (string.IsNullOrWhiteSpace(name)) ModelState.AddModelError("", "Model name is required.");
+        if (string.IsNullOrWhiteSpace(modelId)) ModelState.AddModelError("", "Model ID is required.");
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+            ModelState.AddModelError("", "A valid HTTP(S) model URL is required.");
+        if (!ModelState.IsValid) return View();
+
+        await store.UpdateAsync(state =>
+        {
+            state.Models.Add(new RemoteModel
+            {
+                Name = name,
+                ModelId = modelId,
+                BaseUrl = baseUrl.TrimEnd('/'),
+                ProtectedApiKey = modelClient.ProtectKey(apiKey ?? ""),
+                IsEnabled = true
+            });
+            return true;
+        });
+        return RedirectToAction(nameof(CreateProject));
+    }
+
+    [Authorize(Roles = Roles.Admin), HttpGet]
+    public async Task<IActionResult> CreateProject()
+    {
+        ViewBag.Models = await store.ReadAsync(state => state.Models.Where(x => x.IsEnabled).ToList());
+        return View();
+    }
+
+    [Authorize(Roles = Roles.Admin), HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId)
+    {
+        name = name?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            ModelState.AddModelError("", "Project name is required.");
+            ViewBag.Models = await store.ReadAsync(state => state.Models.Where(x => x.IsEnabled).ToList());
+            return View();
+        }
+
+        await store.UpdateAsync(state =>
+        {
+            var validModelId = defaultModelId is not null && state.Models.Any(x => x.Id == defaultModelId && x.IsEnabled)
+                ? defaultModelId
+                : null;
+            state.Projects.Add(new Project
+            {
+                Name = name,
+                Description = description?.Trim() ?? "",
+                SystemPrompt = systemPrompt?.Trim() ?? "",
+                DefaultModelId = validModelId
+            });
+            return true;
+        });
         return RedirectToAction("Index", "Home");
     }
 

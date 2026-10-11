@@ -1,0 +1,21 @@
+@using DanLoopServer.Models
+@{ ViewData["Title"] = "Create project"; var models = ViewBag.Models as List<RemoteModel> ?? []; }
+<div class="auth-wrap"><section class="auth-card wizard-card">
+    <p class="eyebrow">FIRST RUN · STEP 3 OF 3</p>
+    <h1>Create a project.</h1>
+    <p>Start with a workspace for your loops and jobs, or skip and create one later.</p>
+    <div asp-validation-summary="All" class="error"></div>
+    <form method="post">
+        <label>Name<input name="name" value="@(Context.Request.HasFormContentType ? Context.Request.Form["name"] : "My Project")" required maxlength="100" autofocus /></label>
+        <label>Default model<select name="defaultModelId"><option value="">None</option>
+            @foreach (var item in models)
+            {
+                <option value="@item.Id">@item.Name</option>
+            }
+        </select></label>
+        <label>Description<input name="description" value="@(Context.Request.HasFormContentType ? Context.Request.Form["description"] : "")" maxlength="500" /></label>
+        <label>Project system prompt<textarea name="systemPrompt" rows="4" placeholder="Instructions applied to every job in this project">@(Context.Request.HasFormContentType ? Context.Request.Form["systemPrompt"] : "")</textarea></label>
+        <button>Create project →</button>
+    </form>
+    <a class="wizard-skip" asp-controller="Home" asp-action="Index">Skip for now</a>
+</section></div>
