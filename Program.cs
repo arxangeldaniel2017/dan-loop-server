@@ -1,6 +1,7 @@
 using DanLoopServer.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,13 +21,22 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.SlidingExpiration = true;
     });
 builder.Services.AddAuthorization();
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedProto;
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 builder.Services.AddSingleton<StateStore>();
 builder.Services.AddSingleton<PasswordService>();
+builder.Services.AddSingleton<WorkspaceService>();
 builder.Services.AddHttpClient<RemoteModelClient>(client => client.Timeout = TimeSpan.FromMinutes(5));
+builder.Services.AddHttpClient<GitHubService>(client => client.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddHostedService<JobWorker>();
 
 var app = builder.Build();
 await app.Services.GetRequiredService<StateStore>().InitializeAsync();
+app.UseForwardedHeaders();
 
 if (!app.Environment.IsDevelopment())
 {

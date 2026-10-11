@@ -1,4 +1,5 @@
 @model DashboardViewModel
+@inject GitHubService GitHub
 @{
     ViewData["Title"] = "Dashboard";
     bool CanManage(Guid projectId) => Model.IsAdmin || Model.State.Permissions.Any(x => x.UserId == Model.CurrentUserId && x.ProjectId == projectId && x.CanManage);
@@ -13,8 +14,8 @@
 @if (TempData["Message"] is string message) { <div class="notice">@message</div> }
 
 <nav class="tabs">
-    <button class="tab active" data-tab="projects">Projects</button><button class="tab" data-tab="jobs">Jobs</button>
-    @if (Model.IsAdmin) { <button class="tab" data-tab="models">Models</button><button class="tab" data-tab="access">Access</button> }
+    <button class="tab active" data-tab="projects">Projects</button><button class="tab" data-tab="files">Folders & files</button><button class="tab" data-tab="jobs">Jobs</button><button class="tab" data-tab="messages">Messages</button>
+    @if (Model.IsAdmin) { <button class="tab" data-tab="models">Models</button><button class="tab" data-tab="github">GitHub</button><button class="tab" data-tab="access">Access</button> }
 </nav>
 
 <section id="projects" class="panel tab-panel active">
@@ -34,8 +35,11 @@
     @foreach (var project in Model.VisibleProjects)
     {
         var loops = Model.State.Loops.Where(x => x.ProjectId == project.Id).ToList();
+        var repositoryLinks = Model.State.ProjectRepositories.Where(x => x.ProjectId == project.Id).Select(link => Model.State.GitHubConnections.SelectMany(connection => connection.Repositories).FirstOrDefault(repository => repository.Id == link.RepositoryId)).Where(x => x is not null).ToList();
         <article class="project-card">
             <div class="project-head"><div><span class="dot"></span><h2>@project.Name</h2><p>@project.Description</p></div><span class="pill">@loops.Count loops</span></div>
+            @if (repositoryLinks.Count > 0) { <div class="repository-links">@foreach (var repository in repositoryLinks) { <a href="@repository!.HtmlUrl" target="_blank" rel="noopener">@repository.FullName</a> }</div> }
+            <a class="button project-files" asp-controller="Files" asp-action="Index" asp-route-projectId="@project.Id">Manage folders & files →</a>
             @if (CanManage(project.Id))
             {
                 <details><summary>Edit project & prompt</summary>
@@ -46,36 +50,53 @@
                 </details>
                 <details><summary>Add recurring loop</summary>
                     <form asp-controller="Manage" asp-action="CreateLoop" method="post" class="form-grid compact"><input type="hidden" name="projectId" value="@project.Id" />
-                        <label>Name<input name="name" required /></label><label>Every (seconds)<input name="intervalSeconds" type="number" min="10" value="300" required /></label><label class="wide">Loop prompt<textarea name="prompt" rows="3" required></textarea></label><label class="check"><input type="checkbox" name="isEnabled" value="true" /> Enable now</label><button>Add loop</button>
+                        <label>Name<input name="name" required /></label><label>Every (seconds)<input name="intervalSeconds" type="number" min="10" value="300" required /></label><label>Execution limit<input name="maxExecutions" type="number" min="1" step="1" placeholder="Unlimited" /></label><label class="wide">Loop prompt<textarea name="prompt" rows="3" required></textarea></label><label class="check"><input type="checkbox" name="isEnabled" value="true" /> Enable now</label><button>Add loop</button>
                     </form>
                 </details>
             }
-            <div class="loop-list">
+            <div class="loop-list" data-disclosure-scope>
+                @if (loops.Any()) { <div class="disclosure-toolbar"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".loop-item">Expand all loops</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".loop-item">Collapse all loops</button></div> }
                 @foreach (var loop in loops)
                 {
-                    <div class="loop-row"><div><span class="status @(loop.IsEnabled ? "online" : "")"></span><strong>@loop.Name</strong><small>every @loop.IntervalSeconds sec · @(loop.LastQueuedAt?.ToLocalTime().ToString("g") ?? "not run")</small><p>@loop.Prompt</p></div>
+                    <details class="loop-item" data-disclosure-id="loop-@loop.Id"><summary><span class="status @(loop.IsEnabled ? "online" : "")"></span><strong>@loop.Name</strong><small>every @loop.IntervalSeconds sec · @loop.ExecutionCount run@(loop.ExecutionCount == 1 ? "" : "s") · @(loop.LastQueuedAt?.ToLocalTime().ToString("g") ?? "not run") · limit @(loop.MaxExecutions?.ToString() ?? "unlimited")</small></summary><div class="loop-item-body"><p>@loop.Prompt</p>
+                        @if (CanManage(project.Id)) { <form asp-controller="Manage" asp-action="SetLoopExecutionLimit" method="post" class="loop-limit-form"><input type="hidden" name="id" value="@loop.Id"/><label>Execution limit<input name="maxExecutions" type="number" min="1" step="1" value="@loop.MaxExecutions" placeholder="Unlimited" /></label><button class="secondary">Save limit</button><small>Leave blank for unlimited retries.</small></form> }
                         @if (CanManage(project.Id)) { <div class="actions"><form asp-controller="Manage" asp-action="ToggleLoop" method="post"><input type="hidden" name="id" value="@loop.Id"/><button class="secondary">@(loop.IsEnabled ? "Pause" : "Enable")</button></form><form asp-controller="Manage" asp-action="DeleteLoop" method="post" onsubmit="return confirm('Delete this loop?')"><input type="hidden" name="id" value="@loop.Id"/><button class="danger">Delete</button></form></div> }
-                    </div>
+                    </div></details>
                 }
             </div>
             @if (CanRun(project.Id))
             {
-                <form asp-controller="Manage" asp-action="RunJob" method="post" class="run-box"><input type="hidden" name="projectId" value="@project.Id"/><textarea name="prompt" rows="2" required placeholder="Enter a one-off job prompt…"></textarea><select name="modelId"><option value="">Project default</option>@foreach (var m in Model.State.Models.Where(x => x.IsEnabled)) { <option value="@m.Id">@m.Name</option> }</select><button>Run job →</button></form>
+                <form asp-controller="Manage" asp-action="RunJob" method="post" class="run-box"><input type="hidden" name="projectId" value="@project.Id"/><textarea name="prompt" rows="2" required placeholder="Ask the agent to read or work with project files…"></textarea><div class="run-options"><select name="modelId"><option value="">Project default</option>@foreach (var m in Model.State.Models.Where(x => x.IsEnabled)) { <option value="@m.Id">@m.Name</option> }</select><select name="conversationId"><option value="">New conversation</option>@foreach (var c in Model.State.Conversations.Where(x => x.ProjectId == project.Id).OrderByDescending(x => x.UpdatedAt)) { <option value="@c.Id">Continue: @c.Title</option> }</select></div><button>Run agent →</button>
+                    @if (Model.ProjectFiles.TryGetValue(project.Id, out var projectFiles) && projectFiles.Any()) { <details class="run-files"><summary>Attach project files</summary><div>@foreach (var file in projectFiles) { <label class="check"><input type="checkbox" name="attachmentPaths" value="@file"/> @file</label> }</div></details> }
+                </form>
             }
             @if (Model.IsAdmin) { <form asp-controller="Manage" asp-action="DeleteProject" method="post" class="delete-project" onsubmit="return confirm('Delete this project and all its data?')"><input type="hidden" name="id" value="@project.Id"/><button class="link-danger">Delete project</button></form> }
         </article>
     }
 </section>
 
+<section id="files" class="panel tab-panel">
+    <div class="section-title"><div><p class="eyebrow">PROJECT WORKSPACES</p><h2>Folders & files</h2><p class="muted">Upload, create folders, preview, edit, or safely remove project files.</p></div></div>
+    @if (!Model.VisibleProjects.Any()) { <div class="empty">No project workspaces are available yet.</div> }
+    <div class="workspace-list">
+        @foreach (var project in Model.VisibleProjects)
+        {
+            var fileCount = Model.ProjectFiles.TryGetValue(project.Id, out var files) ? files.Count : 0;
+            <article class="workspace-card"><div><span class="file-icon">📁</span><div><h3>@project.Name</h3><p>@fileCount file@(fileCount == 1 ? "" : "s") in this workspace</p></div></div><a class="button" asp-controller="Files" asp-action="Index" asp-route-projectId="@project.Id">Open file manager →</a></article>
+        }
+    </div>
+</section>
+
 <section id="jobs" class="panel tab-panel">
     <div class="section-title"><div><p class="eyebrow">EXECUTION HISTORY</p><h2>Jobs</h2></div></div>
-    <div class="table-wrap"><table><thead><tr><th>Status</th><th>Project</th><th>Prompt / result</th><th>Created</th><th></th></tr></thead><tbody>
-    @foreach (var job in Model.State.Jobs.Where(j => Model.VisibleProjects.Any(p => p.Id == j.ProjectId)).OrderByDescending(x => x.CreatedAt).Take(100))
-    {
-        var project = Model.State.Projects.FirstOrDefault(x => x.Id == job.ProjectId);
-        <tr><td><span class="badge @job.Status.ToLowerInvariant()">@job.Status</span></td><td>@project?.Name</td><td><strong>@job.Prompt</strong>@if (!string.IsNullOrEmpty(job.Output)) { <details><summary>View output</summary><pre>@job.Output</pre></details> }@if (!string.IsNullOrEmpty(job.Error)) { <p class="error">@job.Error</p> }</td><td>@job.CreatedAt.ToLocalTime().ToString("g")</td><td class="actions">@if (job.Status is JobStatuses.Queued or JobStatuses.Running) { <form asp-controller="Manage" asp-action="CancelJob" method="post"><input type="hidden" name="id" value="@job.Id"/><button class="secondary">Cancel</button></form> }@if (Model.IsAdmin && job.Status != JobStatuses.Running) { <form asp-controller="Manage" asp-action="DeleteJob" method="post"><input type="hidden" name="id" value="@job.Id"/><button class="link-danger">Remove</button></form> }</td></tr>
-    }
-    </tbody></table></div>
+    <div id="jobs-list" data-jobs-url="@Url.Action("JobsPartial", "Home")">@await Html.PartialAsync("_JobsList", Model)</div>
+</section>
+
+<section id="messages" class="panel tab-panel">
+    <div class="section-title"><div><p class="eyebrow">ACTIVITY & ALERTS</p><h2>Messages</h2></div><div class="actions">@foreach (var project in Model.VisibleProjects) { <form asp-controller="Manage" asp-action="ClearMessages" method="post" onsubmit="return confirm('Clear messages for @project.Name?')"><input type="hidden" name="projectId" value="@project.Id"/><button class="secondary">Clear @project.Name</button></form> }@if (Model.IsAdmin) { <form asp-controller="Manage" asp-action="ClearMessages" method="post" onsubmit="return confirm('Clear all messages?')"><button class="link-danger">Clear all messages</button></form> }</div></div>
+    @{ var visibleMessages = Model.State.Messages.Where(message => message.ProjectId is null || Model.VisibleProjects.Any(project => project.Id == message.ProjectId)).OrderByDescending(message => message.CreatedAt).Take(300).ToList(); }
+    @if (!visibleMessages.Any()) { <div class="empty">No messages.</div> }
+    <div class="message-list">@foreach (var item in visibleMessages) { var project = Model.State.Projects.FirstOrDefault(x => x.Id == item.ProjectId); <article class="message-item @item.Level.ToLowerInvariant()"><span class="message-level">@item.Level</span><div><strong>@(project?.Name ?? "System")</strong><p>@item.Text</p></div><time>@item.CreatedAt.ToLocalTime().ToString("g")</time></article> }</div>
 </section>
 
 @if (Model.IsAdmin)
@@ -84,6 +105,53 @@
     <div class="section-title"><div><p class="eyebrow">OPENAI-COMPATIBLE ENDPOINTS</p><h2>Remote models</h2></div></div>
     <form asp-controller="Manage" asp-action="CreateModel" method="post" class="form-grid create-box open"><label>Display name<input name="name" required placeholder="Local Ollama" /></label><label>Model ID<input name="modelId" required placeholder="llama3.2" /></label><label class="wide">Base URL<input name="baseUrl" type="url" required placeholder="http://host.docker.internal:11434/v1" /></label><label class="wide">API key<input name="apiKey" type="password" autocomplete="off" placeholder="Optional for local models" /></label><label class="check"><input type="checkbox" name="isEnabled" value="true" checked /> Enabled</label><button>Add remote model</button></form>
     <div class="cards">@foreach (var m in Model.State.Models) { <div class="mini-card"><span class="status @(m.IsEnabled ? "online" : "")"></span><strong>@m.Name</strong><code>@m.ModelId</code><small>@m.BaseUrl</small><form asp-controller="Manage" asp-action="DeleteModel" method="post" onsubmit="return confirm('Delete this model?')"><input type="hidden" name="id" value="@m.Id"/><button class="link-danger">Delete</button></form></div> }</div>
+</section>
+
+<section id="github" class="panel tab-panel">
+    <div class="section-title"><div><p class="eyebrow">SOURCE CONTROL & AUTOMATION</p><h2>GitHub connections</h2></div></div>
+    <details class="create-box"><summary>＋ Connect with fine-grained token</summary>
+        <form asp-controller="GitHub" asp-action="ConnectToken" method="post" class="form-grid compact">
+            <input type="hidden" name="returnUrl" value="/#github" />
+            <label class="wide">Fine-grained access token<input name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="github_pat_…" /></label>
+            <p class="wide form-help"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token on GitHub ↗</a>. Repository access and capabilities are limited to what you select there. The token is encrypted at rest.</p>
+            <button>Connect GitHub</button>
+        </form>
+    </details>
+    @if (GitHub.IsConfigured) { <details class="configuration-note"><summary>Advanced GitHub App connection</summary><a class="button secondary" asp-controller="GitHub" asp-action="Connect" asp-route-returnUrl="/#github">Connect configured GitHub App</a></details> }
+    @if (!Model.State.GitHubConnections.Any())
+    {
+        <div class="empty">No GitHub accounts are connected yet.</div>
+    }
+    @foreach (var connection in Model.State.GitHubConnections)
+    {
+        <article class="github-card">
+            <div class="project-head"><div><h3>@connection.AccountLogin</h3><p>@connection.AuthenticationType authentication · @connection.AccountType · @connection.Repositories.Count repositories · refreshed @connection.RefreshedAt.ToLocalTime().ToString("g")</p></div>
+                <div class="actions">@if (!string.IsNullOrWhiteSpace(connection.SettingsUrl)) { <a class="button secondary" href="@connection.SettingsUrl">Manage on GitHub</a> }<form asp-controller="GitHub" asp-action="Refresh" method="post"><input type="hidden" name="id" value="@connection.Id"/><button class="secondary">Refresh</button></form><form asp-controller="GitHub" asp-action="Delete" method="post" onsubmit="return confirm('Remove this GitHub connection from the server?')"><input type="hidden" name="id" value="@connection.Id"/><button class="link-danger">Remove</button></form></div>
+            </div>
+            @foreach (var project in Model.State.Projects)
+            {
+                var selected = Model.State.ProjectRepositories.Where(x => x.ProjectId == project.Id && x.GitHubConnectionId == connection.Id).Select(x => x.RepositoryId).ToHashSet();
+                <form asp-controller="GitHub" asp-action="SetProjectRepositories" method="post" class="repository-map">
+                    <input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="connectionId" value="@connection.Id"/>
+                    <strong>@project.Name</strong>
+                    <div class="repository-options">
+                        @foreach (var repository in connection.Repositories)
+                        {
+                            <label class="check"><input type="checkbox" name="repositoryIds" value="@repository.Id" checked="@(selected.Contains(repository.Id))"/> @repository.FullName <small>@(repository.IsPrivate ? "private" : "public")</small></label>
+                        }
+                    </div>
+                    <button class="secondary">Save repositories</button>
+                </form>
+                @foreach (var repository in connection.Repositories.Where(x => selected.Contains(x.Id))) { <form asp-controller="GitHub" asp-action="ImportRepository" method="post" class="import-repository"><input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="repositoryId" value="@repository.Id"/><button class="secondary">Import fresh copy of @repository.FullName</button></form> }
+            }
+        </article>
+    }
+    @foreach (var project in Model.State.Projects)
+    {
+        var mapped = Model.State.ProjectRepositories.Where(x => x.ProjectId == project.Id).Select(x => x.RepositoryId).ToHashSet();
+        var choices = Model.State.GitHubConnections.SelectMany(x => x.Repositories).Where(x => mapped.Contains(x.Id)).ToList();
+        <form asp-controller="GitHub" asp-action="SetResultsRepository" method="post" class="create-box form-grid"><input type="hidden" name="projectId" value="@project.Id"/><label>@project.Name result destination<select name="repositoryId"><option value="">Local project results folder</option>@foreach (var repository in choices) { <option value="@repository.Id" selected="@(project.ResultsRepositoryId == repository.Id)">@repository.FullName</option> }</select></label><button>Save destination</button></form>
+    }
 </section>
 
 <section id="access" class="panel tab-panel">

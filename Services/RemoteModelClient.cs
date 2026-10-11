@@ -23,20 +23,28 @@ public sealed class RemoteModelClient(HttpClient http, IDataProtectionProvider p
         catch { return "unavailable"; }
     }
 
-    public async Task<string> CompleteAsync(RemoteModel model, string systemPrompt, string prompt, CancellationToken cancellationToken)
+    public async Task<string> CompleteAsync(RemoteModel model, string systemPrompt, IReadOnlyList<ConversationMessage> conversation, string currentPrompt, IReadOnlyList<string> imageDataUrls, CancellationToken cancellationToken)
     {
         var url = model.BaseUrl.TrimEnd('/') + "/chat/completions";
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         if (!string.IsNullOrEmpty(model.ProtectedApiKey))
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _protector.Unprotect(model.ProtectedApiKey));
+        var messages = new List<object> { new { role = "system", content = systemPrompt } };
+        foreach (var message in conversation)
+        {
+            var isCurrent = message.JobId == conversation.LastOrDefault()?.JobId && message.Role == "user";
+            if (isCurrent && imageDataUrls.Count > 0)
+            {
+                var content = new List<object> { new { type = "text", text = currentPrompt } };
+                content.AddRange(imageDataUrls.Select(url => (object)new { type = "image_url", image_url = new { url } }));
+                messages.Add(new { role = message.Role, content = (object)content });
+            }
+            else messages.Add(new { role = message.Role, content = (object)(isCurrent ? currentPrompt : message.Content) });
+        }
         request.Content = JsonContent.Create(new
         {
             model = model.ModelId,
-            messages = new object[]
-            {
-                new { role = "system", content = systemPrompt },
-                new { role = "user", content = prompt }
-            }
+            messages
         });
         using var response = await http.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);

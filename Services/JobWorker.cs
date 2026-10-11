@@ -2,7 +2,7 @@ using DanLoopServer.Models;
 
 namespace DanLoopServer.Services;
 
-public sealed class JobWorker(StateStore store, RemoteModelClient client, ILogger<JobWorker> logger) : BackgroundService
+public sealed class JobWorker(StateStore store, RemoteModelClient client, WorkspaceService workspace, GitHubService gitHub, ILogger<JobWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -17,7 +17,7 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, ILogge
                     if (job is null) return null;
                     job.Status = JobStatuses.Running;
                     job.StartedAt = DateTimeOffset.UtcNow;
-                    return new Job { Id = job.Id, ProjectId = job.ProjectId, LoopId = job.LoopId, ModelId = job.ModelId, Prompt = job.Prompt };
+                    return new Job { Id = job.Id, ProjectId = job.ProjectId, LoopId = job.LoopId, ModelId = job.ModelId, Prompt = job.Prompt, ConversationId = job.ConversationId, AttachmentPaths = job.AttachmentPaths };
                 });
                 if (next is not null) await RunAsync(next, stoppingToken);
                 else await Task.Delay(1000, stoppingToken);
@@ -36,14 +36,27 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, ILogge
         var now = DateTimeOffset.UtcNow;
         foreach (var loop in state.Loops.Where(x => x.IsEnabled))
         {
+            var executionCount = Math.Max(loop.ExecutionCount, state.Jobs.Count(x => x.LoopId == loop.Id));
+            loop.ExecutionCount = executionCount;
             if (loop.LastQueuedAt is not null && now - loop.LastQueuedAt < TimeSpan.FromSeconds(Math.Max(10, loop.IntervalSeconds))) continue;
+            if (loop.MaxExecutions is int maximum && executionCount >= maximum)
+            {
+                loop.IsEnabled = false;
+                state.Messages.Add(new AppMessage { ProjectId = loop.ProjectId, Level = MessageLevels.Info, Text = $"Loop '{loop.Name}' reached its execution limit of {maximum} and was paused." });
+                continue;
+            }
             var project = state.Projects.FirstOrDefault(x => x.Id == loop.ProjectId);
             if (project?.DefaultModelId is null) continue;
-            state.Jobs.Add(new Job
+            var conversation = new Conversation { ProjectId = loop.ProjectId, Title = loop.Name };
+            state.Conversations.Add(conversation);
+            var job = new Job
             {
                 ProjectId = loop.ProjectId, LoopId = loop.Id, ModelId = project.DefaultModelId,
-                Prompt = loop.Prompt, CreatedByUserId = Guid.Empty, CreatedAt = now
-            });
+                Prompt = loop.Prompt, CreatedByUserId = Guid.Empty, CreatedAt = now, ConversationId = conversation.Id
+            };
+            state.Jobs.Add(job);
+            loop.ExecutionCount++;
+            conversation.Messages.Add(new ConversationMessage { JobId = job.Id, Role = "user", Content = job.Prompt });
             loop.LastQueuedAt = now;
         }
         return true;
@@ -51,10 +64,18 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, ILogge
 
     private async Task RunAsync(Job job, CancellationToken cancellationToken)
     {
-        var context = await store.ReadAsync(state => new
+        var context = await store.ReadAsync(state =>
         {
-            Project = state.Projects.FirstOrDefault(x => x.Id == job.ProjectId),
-            Model = state.Models.FirstOrDefault(x => x.Id == job.ModelId && x.IsEnabled)
+            var project = state.Projects.FirstOrDefault(x => x.Id == job.ProjectId);
+            return new
+            {
+                Project = project,
+                Model = state.Models.FirstOrDefault(x => x.Id == job.ModelId && x.IsEnabled),
+                Conversation = state.Conversations.FirstOrDefault(x => x.Id == job.ConversationId),
+                ResultsTarget = project?.ResultsRepositoryId is long repositoryId
+                    ? state.GitHubConnections.SelectMany(connection => connection.Repositories.Select(repository => new { Connection = connection, Repository = repository })).FirstOrDefault(x => x.Repository.Id == repositoryId)
+                    : null
+            };
         });
         if (context.Project is null || context.Model is null)
         {
@@ -63,11 +84,51 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, ILogge
         }
         try
         {
-            var output = await client.CompleteAsync(context.Model, context.Project.SystemPrompt, job.Prompt, cancellationToken);
+            var prompt = job.Prompt;
+            var images = new List<string>();
+            if (job.AttachmentPaths.Count > 0)
+            {
+                var attached = new List<string>();
+                foreach (var path in job.AttachmentPaths)
+                {
+                    var image = await workspace.ReadImageDataUrlAsync(job.ProjectId, path);
+                    if (image is not null) images.Add(image); else attached.Add(await workspace.ReadAttachmentAsync(job.ProjectId, path));
+                }
+                prompt += "\n\nPROJECT FILES PROVIDED FOR THIS REQUEST:\n" + string.Join("\n\n", attached);
+            }
+            var messages = context.Conversation?.Messages ?? [new ConversationMessage { JobId = job.Id, Role = "user", Content = job.Prompt }];
+            foreach (var message in messages.Where(x => x.Role == "user" && x.FilePaths.Count > 0))
+            {
+                var fileContext = new List<string>();
+                foreach (var path in message.FilePaths) fileContext.Add(await workspace.ReadAttachmentAsync(job.ProjectId, path));
+                message.Content += "\n\nPROJECT FILES PROVIDED FOR THIS MESSAGE:\n" + string.Join("\n\n", fileContext);
+            }
+            var systemPrompt = context.Project.SystemPrompt + "\n\nYou may create result files by returning fenced blocks in the form ```file:relative/path.ext followed by text content, or ```base64-file:relative/path.ext followed by base64 data. Source project files are read-only; all generated files are saved in a new result folder.";
+            var output = await client.CompleteAsync(context.Model, systemPrompt, messages, prompt, images, cancellationToken);
+            var resultFolder = await workspace.CreateResultFolderAsync(job.ProjectId, job.Id);
+            var resultItem = await workspace.WriteResultTextAsync(job.ProjectId, resultFolder, "response.md", output);
+            var generatedItems = await workspace.WriteGeneratedFilesAsync(job.ProjectId, resultFolder, output);
+            var commitUrl = "";
+            var pushError = "";
+            if (context.ResultsTarget is not null)
+            {
+                try
+                {
+                    var localFolder = await workspace.ResolveProjectPathAsync(job.ProjectId, resultFolder);
+                    commitUrl = await gitHub.PushResultFolderAsync(context.ResultsTarget.Connection, context.ResultsTarget.Repository, localFolder, Path.GetFileName(resultFolder), cancellationToken);
+                }
+                catch (Exception ex) { pushError = ex.Message; logger.LogWarning(ex, "Could not push results for job {JobId}", job.Id); }
+            }
             await store.UpdateAsync(state =>
             {
                 var current = state.Jobs.First(x => x.Id == job.Id);
-                if (current.Status != JobStatuses.Cancelled) { current.Status = JobStatuses.Completed; current.Output = output; }
+                if (current.Status != JobStatuses.Cancelled)
+                {
+                    current.Status = JobStatuses.Completed; current.Output = output; current.ResultFolder = resultFolder; current.ResultItems.Add(resultItem); current.ResultItems.AddRange(generatedItems); current.ResultsCommitUrl = commitUrl; current.ResultsPushError = pushError;
+                    var conversation = state.Conversations.FirstOrDefault(x => x.Id == current.ConversationId);
+                    if (conversation is not null) { conversation.Messages.Add(new ConversationMessage { JobId = current.Id, Role = "assistant", Content = output, FilePaths = current.ResultItems.Select(x => x.RelativePath).ToList() }); conversation.UpdatedAt = DateTimeOffset.UtcNow; }
+                    state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = string.IsNullOrWhiteSpace(pushError) ? MessageLevels.Info : MessageLevels.Warning, Text = string.IsNullOrWhiteSpace(pushError) ? "Job completed successfully." : $"Job completed, but the GitHub push failed: {pushError}" });
+                }
                 current.CompletedAt = DateTimeOffset.UtcNow;
                 return true;
             });
@@ -81,6 +142,7 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, ILogge
         job.Status = JobStatuses.Failed;
         job.Error = error;
         job.CompletedAt = DateTimeOffset.UtcNow;
+        state.Messages.Add(new AppMessage { ProjectId = job.ProjectId, JobId = job.Id, Level = MessageLevels.Error, Text = $"Job failed: {error}" });
         return true;
     });
 }

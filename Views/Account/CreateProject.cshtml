@@ -1,7 +1,7 @@
 @using DanLoopServer.Models
-@{ ViewData["Title"] = "Create project"; var models = ViewBag.Models as List<RemoteModel> ?? []; }
+@{ ViewData["Title"] = "Create project"; var models = ViewBag.Models as List<RemoteModel> ?? []; var connections = ViewBag.GitHubConnections as List<GitHubConnection> ?? []; }
 <div class="auth-wrap"><section class="auth-card wizard-card">
-    <p class="eyebrow">FIRST RUN · STEP 3 OF 3</p>
+    <p class="eyebrow">FIRST RUN · STEP 4 OF 4</p>
     <h1>Create a project.</h1>
     <p>Start with a workspace for your loops and jobs, or skip and create one later.</p>
     <div asp-validation-summary="All" class="error"></div>
@@ -15,6 +15,19 @@
         </select></label>
         <label>Description<input name="description" value="@(Context.Request.HasFormContentType ? Context.Request.Form["description"] : "")" maxlength="500" /></label>
         <label>Project system prompt<textarea name="systemPrompt" rows="4" placeholder="Instructions applied to every job in this project">@(Context.Request.HasFormContentType ? Context.Request.Form["systemPrompt"] : "")</textarea></label>
+        @if (connections.SelectMany(x => x.Repositories).Any())
+        {
+            <fieldset class="repository-picker"><legend>GitHub repositories</legend>
+                @foreach (var connection in connections)
+                {
+                    <strong>@connection.AccountLogin</strong>
+                    @foreach (var repository in connection.Repositories)
+                    {
+                        <label class="check"><input type="checkbox" name="repositoryIds" value="@repository.Id" /> @repository.FullName</label>
+                    }
+                }
+            </fieldset>
+        }
         <button>Create project →</button>
     </form>
     <a class="wizard-skip" asp-controller="Home" asp-action="Index">Skip for now</a>

@@ -40,6 +40,40 @@ The server uses the OpenAI-compatible `POST /chat/completions` API. For a model 
 
 Configure a model in the **Models** tab, then select it as the project default. A recurring loop only queues when its project has a default model.
 
+## GitHub connections
+
+Projects can be linked to any number of repositories from one or more GitHub accounts. Connections can be added during first-run setup or managed later in the **GitHub** tab.
+
+The default connection method uses a fine-grained personal access token and requires no GitHub App registration, callback URL, or server environment variables. Create a token at <https://github.com/settings/personal-access-tokens/new>, limit it to the required repositories, and grant only the capabilities the server needs. Typical permissions are **Metadata: read**, **Contents: read/write**, **Actions: read/write**, **Workflows: read/write**, **Pull requests: read/write**, **Checks: read/write**, and **Commit statuses: read/write**. Paste the token into the setup wizard or GitHub management tab. The token is encrypted with ASP.NET Core Data Protection before it is stored and is never displayed again.
+
+### Optional GitHub App connection
+
+For multi-user production deployments, a GitHub App can be configured as an additional connection method. The server uses GitHub user authorization to verify installations and generates short-lived installation tokens for repository operations.
+
+Create a GitHub App with these URLs, replacing the host with the server's public URL:
+
+- Callback URL: `https://your-host/github/oauthcallback`
+- Setup URL: `https://your-host/github/callback`
+- Enable **Redirect on update** for repository-access changes.
+
+Grant the GitHub App the repository permissions needed by the server: Metadata read, Contents read/write, Workflows read/write, Actions read/write, Pull requests read/write, Checks read/write, and Commit statuses read/write. Then configure these application-platform variables:
+
+- `GITHUB_APP_ID`
+- `GITHUB_APP_SLUG`
+- `GITHUB_CLIENT_ID`
+- `GITHUB_CLIENT_SECRET`
+- `GITHUB_APP_PRIVATE_KEY` (PEM text; escaped `\\n` line breaks are accepted), or `GITHUB_APP_PRIVATE_KEY_PATH`
+
+Connected repositories can be mapped to several projects. A fresh repository snapshot can then be imported into a project's workspace for reading and editing. Projects can also designate one mapped repository as their result destination; completed job result folders are committed under `dan-loop-results/`. Without a result repository, generated files remain local.
+
+## Project files, conversations, and results
+
+Every project receives a numbered folder under `Storage:ProjectsPath` (`data/projects` locally and `/data/projects` in Docker). The file manager supports file and folder uploads, image/text previews, formatted JSON/XML/text editing, recoverable deletes, and ZIP review. ZIP files are always retained unchanged; extraction requires confirmation and uses the ZIP name as its folder name. Conflicts require an explicit keep-both, override, or cancel decision.
+
+Agent runs can attach project files. Text is added to model context and supported images are sent as image inputs to compatible OpenAI-style chat endpoints. Conversation messages and their related files are retained for later runs. Each job writes `response.md` and any model-generated `file:` or `base64-file:` blocks into a new numbered `results/result-N` folder. The Jobs view supports undoing one generated item or the whole result set.
+
+Uploads are limited to 250 MB per request. ZIP extraction is limited to 5,000 entries and 500 MB expanded data, with path-containment validation.
+
 ## Local .NET development
 
 Requires .NET 10 SDK:

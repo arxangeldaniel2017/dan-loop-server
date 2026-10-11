@@ -1,0 +1,62 @@
+@model FileManagerViewModel
+@{
+    ViewData["Title"] = $"Files · {Model.Project.Name}";
+    var parent = string.IsNullOrEmpty(Model.Path) ? "" : string.Join('/', Model.Path.Split('/').SkipLast(1));
+    var folderCount = Model.Entries.Count(item => item.IsDirectory);
+    var fileCount = Model.Entries.Count - folderCount;
+    var totalSize = Model.Entries.Sum(item => item.Size);
+}
+@await Html.PartialAsync("_DashboardShell")
+<section class="section-title file-manager-title"><div><p class="eyebrow">PROJECT WORKSPACE</p><h2>@Model.Project.Name</h2><p class="muted">/@Model.Path</p></div></section>
+@if (TempData["Message"] is string notice) { <div class="notice">@notice</div> }
+
+<div class="file-commandbar" data-file-manager>
+    <details class="file-actions-panel">
+        <summary>＋ Upload files or create folder</summary>
+        <div class="file-toolbar">
+            <form asp-action="Upload" method="post" enctype="multipart/form-data"><input type="hidden" name="projectId" value="@Model.Project.Id"/><label>Upload files<input type="file" name="files" multiple /></label><button>Upload</button></form>
+            <form asp-action="CreateFolder" method="post"><input type="hidden" name="projectId" value="@Model.Project.Id"/><input type="hidden" name="path" value="@Model.Path"/><label>New folder<input name="name" required maxlength="100" /></label><button class="secondary">Create folder</button></form>
+        </div>
+    </details>
+    <div class="explorer-topbar">
+        @if (!string.IsNullOrEmpty(Model.Path)) { <a class="button secondary parent-folder-button" asp-action="Index" asp-route-projectId="@Model.Project.Id" asp-route-path="@parent">← Parent folder</a> }
+        else { <span class="button secondary parent-folder-button disabled" aria-disabled="true">← Parent folder</span> }
+        <div class="explorer-tools">
+            <details class="file-search-panel"><summary>⌕ Search files</summary><label class="file-search"><span>Search</span><input type="search" placeholder="Search this folder…" data-file-search /></label></details>
+            <button type="button" class="secondary view-toggle" data-file-view-toggle aria-label="Switch to list view">☷ List view</button>
+        </div>
+    </div>
+    <div class="file-selection-toolbar">
+        <span><strong>@folderCount</strong> folders · <strong>@fileCount</strong> files · <strong>@FormatSize(totalSize)</strong></span>
+        <button type="button" class="secondary" data-select-files="all">Select all</button>
+        <button type="button" class="secondary" data-select-files="none">Deselect</button>
+        <form id="bulk-delete-form" asp-action="DeleteSelected" method="post" onsubmit="return confirm('Move the selected files and folders to project trash?')"><input type="hidden" name="projectId" value="@Model.Project.Id"/><input type="hidden" name="path" value="@Model.Path"/><button class="danger" data-delete-selected disabled>Delete selected (<span data-selected-count>0</span>)</button></form>
+    </div>
+
+    <div class="explorer-list" data-file-browser data-view="grid">
+        <div class="explorer-heading"><span></span><span>Name</span><span>Type / contents</span><span>Size</span><span>Modified</span></div>
+        @foreach (var item in Model.Entries)
+        {
+            <article class="explorer-item" data-file-item data-file-name="@item.Name.ToLowerInvariant()" data-file-kind="@item.Kind">
+                <label class="file-select" title="Select @item.Name"><input type="checkbox" name="selectedPaths" value="@item.RelativePath" form="bulk-delete-form" data-file-checkbox/><span></span></label>
+                <a class="explorer-main" asp-action="@(item.IsDirectory ? "Index" : "Preview")" asp-route-projectId="@Model.Project.Id" asp-route-path="@item.RelativePath" target="@(item.IsDirectory ? null : "_blank")">
+                    @if (item.Kind == "image") { <img src="@Url.Action("Preview", new { projectId = Model.Project.Id, path = item.RelativePath })" alt="" loading="lazy"/> }
+                    else if (!item.IsDirectory && !string.IsNullOrWhiteSpace(item.Preview)) { <pre>@item.Preview</pre> }
+                    else { <span class="file-icon">@(item.IsDirectory ? "📁" : item.Kind == "zip" ? "ZIP" : item.Kind.ToUpperInvariant())</span> }
+                    <strong>@item.Name</strong>
+                </a>
+                <span class="explorer-type">@(item.IsDirectory ? $"Folder · {item.FileCount} files · {item.DirectoryCount} folders" : item.Kind.ToUpperInvariant())</span>
+                <span class="explorer-size">@FormatSize(item.Size)</span>
+                <time class="explorer-modified">@item.ModifiedAt.ToLocalTime().ToString("g")</time>
+            </article>
+        }
+        @if (!Model.Entries.Any()) { <div class="empty">This folder is empty.</div> }
+        <div class="empty file-search-empty" data-search-empty hidden>No matching files or folders.</div>
+    </div>
+</div>
+
+<section class="conversation-list"><div class="section-title"><div><p class="eyebrow">SAVED CONTEXT</p><h2>Conversations</h2></div></div>
+    @if (!Model.Conversations.Any()) { <div class="empty">No agent conversations yet.</div> }
+    @foreach (var conversation in Model.Conversations) { <article class="conversation-card"><strong>@conversation.Title</strong><small>@conversation.Messages.Count messages · @conversation.UpdatedAt.ToLocalTime().ToString("g")</small>@foreach (var message in conversation.Messages) { <details><summary>@message.Role · @message.CreatedAt.ToLocalTime().ToString("g")</summary><pre>@message.Content</pre>@if (message.FilePaths.Any()) { <p>@string.Join(", ", message.FilePaths)</p> }</details> }</article> }
+</section>
+@functions { string FormatSize(long bytes) => bytes >= 1_073_741_824 ? $"{bytes / 1_073_741_824d:0.##} GB" : bytes >= 1_048_576 ? $"{bytes / 1_048_576d:0.##} MB" : bytes >= 1024 ? $"{bytes / 1024d:0.##} KB" : $"{bytes} B"; }

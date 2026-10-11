@@ -7,37 +7,50 @@ using Microsoft.AspNetCore.Mvc;
 namespace DanLoopServer.Controllers;
 
 [Authorize]
-public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient) : Controller
+public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, WorkspaceService workspace, GitHubService gitHub) : Controller
 {
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
-    public async Task<IActionResult> CreateProject(string name, string description, string systemPrompt, Guid? defaultModelId)
+    public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId)
     {
         if (string.IsNullOrWhiteSpace(name)) return Back("Project name is required.");
-        await store.UpdateAsync(state => { state.Projects.Add(new Project { Name = name.Trim(), Description = description.Trim(), SystemPrompt = systemPrompt.Trim(), DefaultModelId = defaultModelId }); return true; });
+        await store.UpdateAsync(state => { state.Projects.Add(new Project { Name = name.Trim(), Description = description?.Trim() ?? "", SystemPrompt = systemPrompt?.Trim() ?? "", DefaultModelId = defaultModelId }); return true; });
         return Back("Project created.");
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> UpdateProject(Guid id, string name, string description, string systemPrompt, Guid? defaultModelId)
+    public async Task<IActionResult> UpdateProject(Guid id, string? name, string? description, string? systemPrompt, Guid? defaultModelId)
     {
         if (!await CanAsync(id, manage: true)) return Forbid();
-        await store.UpdateAsync(state => { var x = state.Projects.First(p => p.Id == id); x.Name = name.Trim(); x.Description = description.Trim(); x.SystemPrompt = systemPrompt.Trim(); x.DefaultModelId = defaultModelId; return true; });
+        if (string.IsNullOrWhiteSpace(name)) return Back("Project name is required.");
+        await store.UpdateAsync(state => { var x = state.Projects.First(p => p.Id == id); x.Name = name.Trim(); x.Description = description?.Trim() ?? ""; x.SystemPrompt = systemPrompt?.Trim() ?? ""; x.DefaultModelId = defaultModelId; return true; });
         return Back("Project updated.");
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> DeleteProject(Guid id)
     {
-        await store.UpdateAsync(state => { state.Projects.RemoveAll(x => x.Id == id); state.Loops.RemoveAll(x => x.ProjectId == id); state.Jobs.RemoveAll(x => x.ProjectId == id); state.Permissions.RemoveAll(x => x.ProjectId == id); return true; });
+        await store.UpdateAsync(state => { state.Projects.RemoveAll(x => x.Id == id); state.Loops.RemoveAll(x => x.ProjectId == id); state.Jobs.RemoveAll(x => x.ProjectId == id); state.Permissions.RemoveAll(x => x.ProjectId == id); state.ProjectRepositories.RemoveAll(x => x.ProjectId == id); return true; });
         return Back("Project and its loops/jobs deleted.");
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> CreateLoop(Guid projectId, string name, string prompt, int intervalSeconds, bool isEnabled = false)
+    public async Task<IActionResult> CreateLoop(Guid projectId, string name, string prompt, int intervalSeconds, int? maxExecutions, bool isEnabled = false)
     {
         if (!await CanAsync(projectId, manage: true)) return Forbid();
-        await store.UpdateAsync(state => { state.Loops.Add(new LoopDefinition { ProjectId = projectId, Name = name.Trim(), Prompt = prompt.Trim(), IntervalSeconds = Math.Clamp(intervalSeconds, 10, 2_592_000), IsEnabled = isEnabled }); return true; });
+        if (maxExecutions is <= 0) return Back("Execution limit must be a positive number or left blank for unlimited.");
+        await store.UpdateAsync(state => { state.Loops.Add(new LoopDefinition { ProjectId = projectId, Name = name.Trim(), Prompt = prompt.Trim(), IntervalSeconds = Math.Clamp(intervalSeconds, 10, 2_592_000), MaxExecutions = maxExecutions, IsEnabled = isEnabled }); return true; });
         return Back("Loop created.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> SetLoopExecutionLimit(Guid id, int? maxExecutions)
+    {
+        var loop = await store.ReadAsync(s => s.Loops.FirstOrDefault(x => x.Id == id));
+        if (loop is null) return NotFound();
+        if (!await CanAsync(loop.ProjectId, manage: true)) return Forbid();
+        if (maxExecutions is <= 0) return Back("Execution limit must be a positive number or left blank for unlimited.");
+        await store.UpdateAsync(state => { state.Loops.First(x => x.Id == id).MaxExecutions = maxExecutions; return true; });
+        return Back(maxExecutions is null ? "Loop execution limit removed; retries are unlimited." : $"Loop execution limit set to {maxExecutions}.");
     }
 
     [HttpPost, ValidateAntiForgeryToken]
@@ -61,7 +74,7 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> RunJob(Guid projectId, string prompt, Guid? modelId)
+    public async Task<IActionResult> RunJob(Guid projectId, string prompt, Guid? modelId, Guid? conversationId, List<string>? attachmentPaths)
     {
         if (!await CanAsync(projectId, run: true)) return Forbid();
         if (string.IsNullOrWhiteSpace(prompt)) return Back("Job prompt is required.");
@@ -69,7 +82,16 @@ public sealed class ManageController(StateStore store, PasswordService passwords
         await store.UpdateAsync(state =>
         {
             var project = state.Projects.First(x => x.Id == projectId);
-            state.Jobs.Add(new Job { ProjectId = projectId, Prompt = prompt.Trim(), ModelId = modelId ?? project.DefaultModelId, CreatedByUserId = userId });
+            var conversation = conversationId is not null ? state.Conversations.FirstOrDefault(x => x.Id == conversationId && x.ProjectId == projectId) : null;
+            if (conversation is null)
+            {
+                conversation = new Conversation { ProjectId = projectId, Title = prompt.Trim()[..Math.Min(prompt.Trim().Length, 80)] };
+                state.Conversations.Add(conversation);
+            }
+            var job = new Job { ProjectId = projectId, Prompt = prompt.Trim(), ModelId = modelId ?? project.DefaultModelId, CreatedByUserId = userId, ConversationId = conversation.Id, AttachmentPaths = attachmentPaths?.Distinct().ToList() ?? [] };
+            state.Jobs.Add(job);
+            conversation.Messages.Add(new ConversationMessage { JobId = job.Id, Role = "user", Content = job.Prompt, FilePaths = job.AttachmentPaths });
+            conversation.UpdatedAt = DateTimeOffset.UtcNow;
             return true;
         });
         return Back("Job queued.");
@@ -90,6 +112,62 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     {
         await store.UpdateAsync(s => { s.Jobs.RemoveAll(x => x.Id == id && x.Status != JobStatuses.Running); return true; });
         return Back("Job removed.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> ClearProjectJobs(Guid projectId)
+    {
+        if (!await CanAsync(projectId, manage: true)) return Forbid();
+        var removed = await store.UpdateAsync(state => state.Jobs.RemoveAll(x => x.ProjectId == projectId && x.Status != JobStatuses.Running));
+        return Back($"Cleared {removed} finished project jobs.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> ClearAllJobs()
+    {
+        var removed = await store.UpdateAsync(state => state.Jobs.RemoveAll(x => x.Status != JobStatuses.Running));
+        return Back($"Cleared {removed} finished jobs.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> ClearMessages(Guid? projectId)
+    {
+        if (projectId is not null && !await CanAsync(projectId.Value, manage: true)) return Forbid();
+        if (projectId is null && !User.IsInRole(Roles.Admin)) return Forbid();
+        var removed = await store.UpdateAsync(state => state.Messages.RemoveAll(x => projectId is null || x.ProjectId == projectId));
+        return Back($"Cleared {removed} messages.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> RetryResultPush(Guid id, CancellationToken cancellationToken)
+    {
+        var job = await store.ReadAsync(s => s.Jobs.FirstOrDefault(x => x.Id == id));
+        if (job is null) return NotFound();
+        if (!await CanAsync(job.ProjectId, run: true)) return Forbid();
+        if (string.IsNullOrWhiteSpace(job.ResultFolder)) return Back("This job has no result folder to push.");
+
+        var target = await store.ReadAsync(state =>
+        {
+            var project = state.Projects.FirstOrDefault(x => x.Id == job.ProjectId);
+            return project?.ResultsRepositoryId is long repositoryId
+                ? state.GitHubConnections.SelectMany(connection => connection.Repositories.Select(repository => new { Connection = connection, Repository = repository })).FirstOrDefault(x => x.Repository.Id == repositoryId)
+                : null;
+        });
+        if (target is null) return Back("Select a GitHub result destination for this project first.");
+
+        try
+        {
+            var localFolder = await workspace.ResolveProjectPathAsync(job.ProjectId, job.ResultFolder);
+            var resultName = Path.GetFileName(job.ResultFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            var commitUrl = await gitHub.PushResultFolderAsync(target.Connection, target.Repository, localFolder, resultName, cancellationToken);
+            await store.UpdateAsync(state => { var current = state.Jobs.First(x => x.Id == id); current.ResultsCommitUrl = commitUrl; current.ResultsPushError = ""; state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = MessageLevels.Info, Text = "GitHub result push completed." }); return true; });
+            return Back("GitHub push completed.");
+        }
+        catch (Exception ex)
+        {
+            await store.UpdateAsync(state => { var current = state.Jobs.First(x => x.Id == id); current.ResultsPushError = ex.Message; state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = MessageLevels.Warning, Text = $"GitHub result push failed: {ex.Message}" }); return true; });
+            return Back("GitHub push failed: " + ex.Message);
+        }
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]

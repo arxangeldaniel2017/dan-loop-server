@@ -1,6 +1,6 @@
 @{ ViewData["Title"] = "Configure model"; }
 <div class="auth-wrap"><section class="auth-card wizard-card">
-    <p class="eyebrow">FIRST RUN · STEP 2 OF 3</p>
+    <p class="eyebrow">FIRST RUN · STEP 2 OF 4</p>
     <h1>Connect a model.</h1>
     <p>Add an OpenAI-compatible endpoint now, or skip this step and configure one later.</p>
     <div asp-validation-summary="All" class="error"></div>
@@ -11,5 +11,5 @@
         <label>API key<input name="apiKey" type="password" autocomplete="off" placeholder="Optional for local models" /></label>
         <button>Add model and continue →</button>
     </form>
-    <a class="wizard-skip" asp-action="CreateProject">Skip for now</a>
+    <a class="wizard-skip" asp-controller="GitHub" asp-action="Setup">Skip for now</a>
 </section></div>

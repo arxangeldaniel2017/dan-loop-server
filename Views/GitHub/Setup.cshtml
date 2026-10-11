@@ -1,0 +1,19 @@
+@model GitHubService
+@{ ViewData["Title"] = "Connect GitHub"; }
+<div class="auth-wrap"><section class="auth-card wizard-card">
+    <p class="eyebrow">FIRST RUN · STEP 3 OF 4</p>
+    <h1>Connect GitHub.</h1>
+    <p>Paste a fine-grained personal access token to let this server work with the repositories you selected when creating the token.</p>
+    @if (TempData["Message"] is string message) { <div class="notice">@message</div> }
+    <form asp-action="ConnectToken" method="post" class="form-grid">
+        <input type="hidden" name="returnUrl" value="/Account/CreateProject" />
+        <label class="wide">Fine-grained access token<input name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="github_pat_…" /></label>
+        <p class="wide form-help"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token on GitHub ↗</a>. Select the repositories you want this server to manage and grant the needed repository permissions. It will be encrypted before it is saved.</p>
+        <button class="wizard-primary">Connect GitHub →</button>
+    </form>
+    @if (Model.IsConfigured)
+    {
+        <details><summary>Advanced: connect through a configured GitHub App</summary><a class="button secondary" asp-action="Connect" asp-route-returnUrl="/Account/CreateProject">Authorize GitHub App</a></details>
+    }
+    <a class="wizard-skip" asp-controller="Account" asp-action="CreateProject">Skip for now</a>
+</section></div>

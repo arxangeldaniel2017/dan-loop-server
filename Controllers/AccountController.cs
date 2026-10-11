@@ -62,24 +62,24 @@ public sealed class AccountController(StateStore store, PasswordService password
             });
             return true;
         });
-        return RedirectToAction(nameof(CreateProject));
+        return RedirectToAction("Setup", "GitHub");
     }
 
     [Authorize(Roles = Roles.Admin), HttpGet]
     public async Task<IActionResult> CreateProject()
     {
-        ViewBag.Models = await store.ReadAsync(state => state.Models.Where(x => x.IsEnabled).ToList());
+        await LoadProjectSetupOptionsAsync();
         return View();
     }
 
     [Authorize(Roles = Roles.Admin), HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId)
+    public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId, long[]? repositoryIds)
     {
         name = name?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(name))
         {
             ModelState.AddModelError("", "Project name is required.");
-            ViewBag.Models = await store.ReadAsync(state => state.Models.Where(x => x.IsEnabled).ToList());
+            await LoadProjectSetupOptionsAsync();
             return View();
         }
 
@@ -88,16 +88,37 @@ public sealed class AccountController(StateStore store, PasswordService password
             var validModelId = defaultModelId is not null && state.Models.Any(x => x.Id == defaultModelId && x.IsEnabled)
                 ? defaultModelId
                 : null;
-            state.Projects.Add(new Project
+            var project = new Project
             {
                 Name = name,
                 Description = description?.Trim() ?? "",
                 SystemPrompt = systemPrompt?.Trim() ?? "",
                 DefaultModelId = validModelId
-            });
+            };
+            state.Projects.Add(project);
+            var selectedRepositories = (repositoryIds ?? []).ToHashSet();
+            foreach (var connection in state.GitHubConnections)
+            foreach (var repository in connection.Repositories.Where(x => selectedRepositories.Contains(x.Id)))
+                state.ProjectRepositories.Add(new ProjectRepository
+                {
+                    ProjectId = project.Id,
+                    GitHubConnectionId = connection.Id,
+                    RepositoryId = repository.Id
+                });
             return true;
         });
         return RedirectToAction("Index", "Home");
+    }
+
+    private async Task LoadProjectSetupOptionsAsync()
+    {
+        var options = await store.ReadAsync(state => new
+        {
+            Models = state.Models.Where(x => x.IsEnabled).ToList(),
+            Connections = state.GitHubConnections
+        });
+        ViewBag.Models = options.Models;
+        ViewBag.GitHubConnections = options.Connections;
     }
 
     [AllowAnonymous, HttpGet]

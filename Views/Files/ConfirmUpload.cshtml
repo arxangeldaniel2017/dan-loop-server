@@ -1,0 +1,15 @@
+@model UploadConfirmationViewModel
+@{ ViewData["Title"] = "Confirm upload"; }
+@await Html.PartialAsync("_DashboardShell")
+<div class="auth-wrap"><section class="auth-card wizard-card"><p class="eyebrow">UPLOAD REVIEW</p><h1>Keep the originals safe.</h1>
+<p>Review ZIP extraction and name conflicts before anything is added to the project.</p>
+@if (Context.Request.Query["error"].ToString() is { Length: > 0 } error) { <div class="error">@error</div> }
+<ul>@foreach (var item in Model.Upload.Items) { <li>@item.RelativePath (@item.Size bytes) @(item.IsZip ? "· ZIP archive" : "")</li> }</ul>
+@if (Model.Conflicts.Any()) { <div class="configuration-note"><strong>Name conflicts:</strong> @string.Join(", ", Model.Conflicts)</div> }
+<form method="post"><input type="hidden" name="id" value="@Model.Upload.Id"/>
+    @if (Model.Conflicts.Any()) { <label>For conflicts<select name="conflictAction"><option value="keep">Keep both (rename incoming)</option><option value="override">Override existing</option><option value="cancel">Cancel upload</option></select></label> }
+    else { <input type="hidden" name="conflictAction" value="keep"/> }
+    @if (Model.ContainsZip) { <label>ZIP archives<select name="zipAction"><option value="extract">Keep ZIP and extract into a same-name folder</option><option value="keep">Keep ZIP only</option><option value="cancel">Cancel upload</option></select></label> }
+    else { <input type="hidden" name="zipAction" value="keep"/> }
+    <button>Apply upload</button>
+</form><form method="post"><input type="hidden" name="id" value="@Model.Upload.Id"/><input type="hidden" name="conflictAction" value="cancel"/><input type="hidden" name="zipAction" value="cancel"/><button class="wizard-skip link-button">Cancel upload</button></form></section></div>

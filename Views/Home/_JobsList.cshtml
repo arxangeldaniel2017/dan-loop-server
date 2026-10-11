@@ -1,0 +1,85 @@
+@model DashboardViewModel
+@{
+    var jobs = Model.State.Jobs.Where(j => Model.VisibleProjects.Any(p => p.Id == j.ProjectId)).OrderByDescending(x => x.CreatedAt).Take(500).ToList();
+    var groups = jobs.GroupBy(job => job.LoopId is Guid loopId ? $"loop-{loopId:N}" : $"job-{job.Id:N}")
+        .Select(group => new { Key = group.Key, Attempts = group.OrderByDescending(x => x.CreatedAt).ToList(), Latest = group.OrderByDescending(x => x.CreatedAt).First() })
+        .OrderByDescending(group => group.Latest.CreatedAt).ToList();
+    var version = string.Join('|', jobs.Select(job => $"{job.Id:N}:{job.Status}:{job.StartedAt?.ToUnixTimeMilliseconds()}:{job.CompletedAt?.ToUnixTimeMilliseconds()}:{job.ResultsCommitUrl}:{job.ResultsPushError}"));
+    var visibleProjectIds = Model.VisibleProjects.Select(project => project.Id).ToHashSet();
+    var runningJobs = jobs.Where(job => job.Status == JobStatuses.Running).OrderByDescending(job => job.StartedAt).ToList();
+    var queuedJobs = jobs.Where(job => job.Status == JobStatuses.Queued).OrderBy(job => job.CreatedAt).ToList();
+    var enabledLoops = Model.State.Loops.Where(loop => visibleProjectIds.Contains(loop.ProjectId) && loop.IsEnabled).ToList();
+    var nextLoop = enabledLoops.Select(loop => new { Loop = loop, NextAt = loop.LastQueuedAt is DateTimeOffset last ? last.AddSeconds(Math.Max(10, loop.IntervalSeconds)) : DateTimeOffset.UtcNow }).OrderBy(item => item.NextAt).FirstOrDefault();
+    var activityState = runningJobs.Any() ? "running" : queuedJobs.Any() || enabledLoops.Any() ? "waiting" : "stopped";
+    var activityVersion = $"{activityState}:{runningJobs.Count}:{queuedJobs.Count}:{nextLoop?.Loop.Id}:{nextLoop?.NextAt.ToUnixTimeSeconds()}";
+    version = $"{activityVersion}|{version}";
+    string Duration(Job job) => job.StartedAt is DateTimeOffset started ? ((job.CompletedAt ?? DateTimeOffset.UtcNow) - started).ToString(@"hh\:mm\:ss") : "—";
+}
+<div class="jobs-refresh-region" data-disclosure-scope data-jobs-version="@version">
+    <div class="job-activity-strip @activityState" data-job-activity="@activityState" data-activity-version="@activityVersion">
+        <span class="activity-indicator" aria-hidden="true"></span>
+        <div class="activity-copy">
+            @if (runningJobs.Any())
+            {
+                var active = runningJobs[0];
+                var activeLoop = active.LoopId is Guid activeLoopId ? Model.State.Loops.FirstOrDefault(loop => loop.Id == activeLoopId) : null;
+                var activeProject = Model.State.Projects.FirstOrDefault(project => project.Id == active.ProjectId);
+                <strong>In progress now</strong><span class="activity-message">@(activeLoop?.Name ?? activeProject?.Name): @active.Prompt</span>
+            }
+            else if (queuedJobs.Any())
+            {
+                <strong>Waiting</strong><span class="activity-message">@queuedJobs.Count job@(queuedJobs.Count == 1 ? " is" : "s are") queued and ready to start.</span>
+            }
+            else if (nextLoop is not null)
+            {
+                <strong>Waiting</strong><span class="activity-message">Scheduler is active · @nextLoop.Loop.Name starts <span data-next-run-time="@nextLoop.NextAt.ToString("O")">soon</span>.</span>
+            }
+            else
+            {
+                <strong>Stopped</strong><span class="activity-message">No job is running and no recurring loop is enabled.</span>
+            }
+        </div>
+        @if (runningJobs.Count > 1 || queuedJobs.Any())
+        {
+            <span class="activity-count">@runningJobs.Count running · @queuedJobs.Count waiting</span>
+        }
+    </div>
+    <div class="disclosure-toolbar jobs-toolbar">
+        <span class="muted">Updates automatically · newest first</span>
+        <button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".job-item">Expand all</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".job-item">Collapse all</button>
+        @foreach (var project in Model.VisibleProjects) { <form asp-controller="Manage" asp-action="ClearProjectJobs" method="post" onsubmit="return confirm('Clear all finished jobs for @project.Name?')"><input type="hidden" name="projectId" value="@project.Id"/><button class="link-danger">Clear @project.Name jobs</button></form> }
+        @if (Model.IsAdmin) { <form asp-controller="Manage" asp-action="ClearAllJobs" method="post" onsubmit="return confirm('Clear all finished jobs? Running jobs will remain.')"><button class="link-danger">Clear all jobs</button></form> }
+    </div>
+    @if (!groups.Any()) { <div class="empty">No jobs yet.</div> }
+    <div class="job-list">
+    @for (var groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+    {
+        var group = groups[groupIndex];
+        var job = group.Latest;
+        var project = Model.State.Projects.FirstOrDefault(x => x.Id == job.ProjectId);
+        var loop = job.LoopId is Guid loopId ? Model.State.Loops.FirstOrDefault(x => x.Id == loopId) : null;
+        if (groupIndex + 1 < groups.Count)
+        {
+            var olderJob = groups[groupIndex + 1].Latest;
+            if (job.StartedAt is DateTimeOffset currentStarted && olderJob.CompletedAt is DateTimeOffset olderEnded)
+            {
+                var gapSeconds = (long)(currentStarted - olderEnded).TotalSeconds;
+                <div class="job-gap" data-job-gap="@group.Key" data-gap-seconds="@gapSeconds"><span>New group started <strong data-gap-label></strong></span></div>
+            }
+        }
+        <details class="job-item" data-disclosure-id="@group.Key" data-job-key="@group.Key" data-job-status="@job.Status.ToLowerInvariant()">
+            <summary class="job-summary"><span class="job-status"><span class="running-dot" aria-hidden="true"></span><span class="badge @job.Status.ToLowerInvariant()">@job.Status</span></span><strong>@(loop?.Name ?? project?.Name)</strong><span class="job-prompt-preview">@job.Prompt</span><time class="smart-start" data-relative-time="@job.StartedAt?.ToString("O")" title="Started @(job.StartedAt?.ToLocalTime().ToString("F") ?? "waiting")">Started <span>@(job.StartedAt?.ToLocalTime().ToString("g") ?? "waiting")</span></time></summary>
+            <div class="job-body">
+                <div class="job-timing"><span>Started <strong>@(job.StartedAt?.ToLocalTime().ToString("g") ?? "waiting")</strong></span><span>Ended <strong>@(job.CompletedAt?.ToLocalTime().ToString("g") ?? "running")</strong></span><span>Duration <strong>@Duration(job)</strong></span></div>
+                <p class="job-prompt">@job.Prompt</p>
+                @if (loop is not null) { <details class="job-attempts" data-disclosure-id="@group.Key-attempts"><summary>@group.Attempts.Count executions · retry messages</summary>@foreach (var attempt in group.Attempts) { <div class="attempt-row"><span class="badge @attempt.Status.ToLowerInvariant()">@attempt.Status</span><time>@attempt.CreatedAt.ToLocalTime().ToString("g")</time><span>@(attempt.Error.Length > 0 ? attempt.Error : attempt.ResultsPushError.Length > 0 ? attempt.ResultsPushError : "No error")</span><small>@Duration(attempt)</small></div> }</details> }
+                @if (!string.IsNullOrEmpty(job.Output)) { <details data-disclosure-id="@group.Key-output"><summary>View output</summary><pre>@job.Output</pre></details> }
+                @if (job.ResultItems.Any()) { <details data-disclosure-id="@group.Key-results"><summary>Result files</summary>@foreach (var result in job.ResultItems) { <div class="result-file"><a asp-controller="Files" asp-action="Preview" asp-route-projectId="@job.ProjectId" asp-route-path="@result.RelativePath" target="_blank">@(result.IsUndone ? "↩ " : "")@result.RelativePath</a>@if (!result.IsUndone) { <form asp-controller="Files" asp-action="UndoResult" method="post"><input type="hidden" name="jobId" value="@job.Id"/><input type="hidden" name="path" value="@result.RelativePath"/><button class="link-danger">Undo</button></form> }</div> }@if (job.ResultItems.Any(x => !x.IsUndone)) { <form asp-controller="Files" asp-action="UndoAll" method="post"><input type="hidden" name="jobId" value="@job.Id"/><button class="danger">Undo all result files</button></form> }@if (!string.IsNullOrWhiteSpace(job.ResultsCommitUrl)) { <a href="@job.ResultsCommitUrl" target="_blank" rel="noopener">View GitHub commit</a> }@if (!string.IsNullOrWhiteSpace(job.ResultsPushError)) { <p class="error">GitHub push failed: @job.ResultsPushError</p><form asp-controller="Manage" asp-action="RetryResultPush" method="post"><input type="hidden" name="id" value="@job.Id"/><button class="secondary">Retry GitHub push</button></form> }</details> }
+                @if (!string.IsNullOrEmpty(job.Error)) { <p class="error">@job.Error</p> }
+                <div class="actions">@if (job.Status is JobStatuses.Queued or JobStatuses.Running) { <form asp-controller="Manage" asp-action="CancelJob" method="post"><input type="hidden" name="id" value="@job.Id"/><button class="secondary">Cancel</button></form> }@if (Model.IsAdmin && job.Status != JobStatuses.Running) { <form asp-controller="Manage" asp-action="DeleteJob" method="post"><input type="hidden" name="id" value="@job.Id"/><button class="link-danger">Remove latest execution</button></form> }</div>
+            </div>
+        </details>
+    }
+    </div>
+    <nav class="job-pagination" data-job-pagination><button type="button" class="secondary" data-page-action="previous">Previous</button><span data-page-status></span><button type="button" class="secondary" data-page-action="next">Next</button></nav>
+</div>

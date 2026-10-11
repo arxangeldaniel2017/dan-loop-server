@@ -6,4 +6,5 @@ public sealed class DashboardViewModel
     public required IReadOnlyList<Project> VisibleProjects { get; init; }
     public bool IsAdmin { get; init; }
     public Guid CurrentUserId { get; init; }
+    public IReadOnlyDictionary<Guid, IReadOnlyList<string>> ProjectFiles { get; init; } = new Dictionary<Guid, IReadOnlyList<string>>();
 }

@@ -1,0 +1,15 @@
+@{
+    var projectCount = ViewBag.DashboardProjectCount is int projects ? projects : 0;
+    var liveLoopCount = ViewBag.DashboardLiveLoopCount is int loops ? loops : 0;
+    var activeJobCount = ViewBag.DashboardActiveJobCount is int jobs ? jobs : 0;
+    var isAdmin = ViewBag.DashboardIsAdmin is true;
+    string DashboardTab(string fragment) => $"{Url.Action("Index", "Home")}#{fragment}";
+}
+<section class="hero dashboard-shell-hero">
+    <div><p class="eyebrow">ORCHESTRATION CONTROL PLANE</p><h1>Loops that keep moving.</h1><p>Manage prompts, recurring work, remote models and access from one local dashboard.</p></div>
+    <div class="metrics"><div><strong>@projectCount</strong><span>projects</span></div><div><strong>@liveLoopCount</strong><span>live loops</span></div><div><strong>@activeJobCount</strong><span>active jobs</span></div></div>
+</section>
+<nav class="tabs dashboard-page-tabs">
+    <a class="tab" href="@DashboardTab("projects")">Projects</a><a class="tab active" href="@DashboardTab("files")">Folders & files</a><a class="tab" href="@DashboardTab("jobs")">Jobs</a><a class="tab" href="@DashboardTab("messages")">Messages</a>
+    @if (isAdmin) { <a class="tab" href="@DashboardTab("models")">Models</a><a class="tab" href="@DashboardTab("github")">GitHub</a><a class="tab" href="@DashboardTab("access")">Access</a> }
+</nav>

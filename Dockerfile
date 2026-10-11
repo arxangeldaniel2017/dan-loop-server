@@ -14,6 +14,7 @@ ENV ASPNETCORE_URLS=http://+:8080 \
     ASPNETCORE_ENVIRONMENT=Production \
     Storage__StatePath=/data/state.json \
     Storage__SqlitePath=/data/dan-loop.db \
+    Storage__ProjectsPath=/data/projects \
     Storage__KeyPath=/data/keys
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "DanLoopServer.dll"]
