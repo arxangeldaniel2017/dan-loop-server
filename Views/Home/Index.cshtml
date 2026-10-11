@@ -14,11 +14,12 @@
 @if (TempData["Message"] is string message) { <div class="notice">@message</div> }
 
 <nav class="tabs">
-    <button class="tab active" data-tab="projects">Projects</button><button class="tab" data-tab="files">Folders & files</button><button class="tab" data-tab="jobs">Jobs</button><button class="tab" data-tab="messages">Messages</button>
-    @if (Model.IsAdmin) { <button class="tab advanced-tab" data-tab="tools">Tool configuration <small>Advanced</small></button><button class="tab" data-tab="models">Models</button><button class="tab" data-tab="github">GitHub</button><button class="tab" data-tab="access">Access</button> }
+    <button class="tab active" data-tab="projects">Projects</button><button class="tab" data-tab="steps">Execution plan</button><button class="tab" data-tab="files">Folders & files</button><button class="tab" data-tab="jobs">Jobs</button><button class="tab" data-tab="chats">Chats</button>
+    @if (Model.IsAdmin) { <button class="tab" data-tab="tools">Tools</button><button class="tab advanced-tab" data-tab="workspace">AI workspace access <small>Advanced</small></button><button class="tab" data-tab="models">Models</button><button class="tab" data-tab="github">GitHub</button><button class="tab" data-tab="access">Access</button> }
 </nav>
 
 <section id="projects" class="panel tab-panel active">
+    <div class="export-toolbar"><a class="button secondary" asp-controller="Export" asp-action="Projects">Export projects CSV</a><a class="button secondary" asp-controller="Export" asp-action="Loops">Export loops CSV</a></div>
     @if (Model.IsAdmin)
     {
         <details class="create-box"><summary>＋ New project</summary>
@@ -67,7 +68,6 @@
             @if (CanRun(project.Id))
             {
                 <form asp-controller="Manage" asp-action="RunJob" method="post" class="run-box"><input type="hidden" name="projectId" value="@project.Id"/><textarea name="prompt" rows="2" required placeholder="Ask the agent to read or work with project files…"></textarea><div class="run-options"><select name="modelId"><option value="">Project default</option>@foreach (var m in Model.State.Models.Where(x => x.IsEnabled)) { <option value="@m.Id">@m.Name</option> }</select><select name="conversationId"><option value="">New conversation</option>@foreach (var c in Model.State.Conversations.Where(x => x.ProjectId == project.Id).OrderByDescending(x => x.UpdatedAt)) { <option value="@c.Id">Continue: @c.Title</option> }</select></div><button>Run agent →</button>
-                    @if (Model.ProjectFiles.TryGetValue(project.Id, out var projectFiles) && projectFiles.Any()) { <details class="run-files"><summary>Attach project files</summary><div>@foreach (var file in projectFiles) { <label class="check"><input type="checkbox" name="attachmentPaths" value="@file"/> @file</label> }</div></details> }
                 </form>
             }
             @if (Model.IsAdmin) { <form asp-controller="Manage" asp-action="DeleteProject" method="post" class="delete-project" onsubmit="return confirm('Delete this project and all its data?')"><input type="hidden" name="id" value="@project.Id"/><button class="link-danger">Delete project</button></form> }
@@ -75,44 +75,59 @@
     }
 </section>
 
+<section id="steps" class="panel tab-panel">
+    <div class="section-title"><div><p class="eyebrow">SERVER-MANAGED WORKFLOW</p><h2>Execution plan</h2><p class="muted">AI proposes the plan; the server owns step order, attempts, retries, and outcomes. PLAN.md is restored from this record if it is deleted.</p></div><a class="button secondary" asp-controller="Export" asp-action="Plans">Export CSV</a></div>
+    <div id="plan-steps-list" data-plan-steps-url="@Url.Action("PlanStepsPartial", "Home")">@await Html.PartialAsync("_PlanSteps", Model)</div>
+</section>
+
 <section id="files" class="panel tab-panel">
-    <div class="section-title"><div><p class="eyebrow">PROJECT WORKSPACES</p><h2>Folders & files</h2><p class="muted">Upload, create folders, preview, edit, or safely remove project files.</p></div></div>
+    <div class="section-title"><div><h2>Folders & files</h2><p class="muted">Upload, create folders, preview, edit, or safely remove project files.</p></div><a class="button secondary" asp-controller="Export" asp-action="Files">Export CSV</a></div>
     @if (!Model.VisibleProjects.Any()) { <div class="empty">No project workspaces are available yet.</div> }
-    <div class="workspace-list">
-        @foreach (var project in Model.VisibleProjects)
-        {
-            var fileCount = Model.ProjectFiles.TryGetValue(project.Id, out var files) ? files.Count : 0;
-            <article class="workspace-card"><div><span class="file-icon">📁</span><div><h3>@project.Name</h3><p>@fileCount file@(fileCount == 1 ? "" : "s") in this workspace</p></div></div><a class="button" asp-controller="Files" asp-action="Index" asp-route-projectId="@project.Id">Open file manager →</a></article>
-        }
-    </div>
+    @if (Model.VisibleProjects.Any())
+    {
+        <div class="file-project-switcher">
+            <select aria-label="Project" data-file-project-select>@foreach (var project in Model.VisibleProjects) { <option value="@project.Id" data-workspace-url="@Url.Action("WorkspacePartial", "Files", new { projectId = project.Id })">@project.Name</option> }</select>
+        </div>
+        <div class="dashboard-inline-workspace selected-project-workspace" data-selected-workspace></div>
+    }
 </section>
 
 <section id="jobs" class="panel tab-panel">
-    <div class="section-title"><div><p class="eyebrow">EXECUTION HISTORY</p><h2>Jobs</h2></div></div>
+    <div class="section-title"><div><p class="eyebrow">EXECUTION HISTORY</p><h2>Jobs</h2></div><a class="button secondary" asp-controller="Export" asp-action="Jobs">Export CSV</a></div>
     <div id="jobs-list" data-jobs-url="@Url.Action("JobsPartial", "Home")">@await Html.PartialAsync("_JobsList", Model)</div>
 </section>
 
-<section id="messages" class="panel tab-panel">
-    <div class="section-title"><div><p class="eyebrow">ACTIVITY & ALERTS</p><h2>Messages</h2></div><div class="actions">@foreach (var project in Model.VisibleProjects) { <form asp-controller="Manage" asp-action="ClearMessages" method="post" onsubmit="return confirm('Clear messages for @project.Name?')"><input type="hidden" name="projectId" value="@project.Id"/><button class="secondary">Clear @project.Name</button></form> }@if (Model.IsAdmin) { <form asp-controller="Manage" asp-action="ClearMessages" method="post" onsubmit="return confirm('Clear all messages?')"><button class="link-danger">Clear all messages</button></form> }</div></div>
-    @{ var visibleMessages = Model.State.Messages.Where(message => message.ProjectId is null || Model.VisibleProjects.Any(project => project.Id == message.ProjectId)).OrderByDescending(message => message.CreatedAt).Take(300).ToList(); }
-    @if (!visibleMessages.Any()) { <div class="empty">No messages.</div> }
-    <div class="message-list">@foreach (var item in visibleMessages) { var project = Model.State.Projects.FirstOrDefault(x => x.Id == item.ProjectId); <article class="message-item @item.Level.ToLowerInvariant()"><span class="message-level">@item.Level</span><div><strong>@(project?.Name ?? "System")</strong><p>@item.Text</p></div><time>@item.CreatedAt.ToLocalTime().ToString("g")</time></article> }</div>
+<section id="chats" class="panel tab-panel">
+    <div class="section-title"><div><p class="eyebrow">REQUEST & RESPONSE HISTORY</p><h2>Chats</h2><p class="muted">Messages and request/response history update independently without refreshing the page.</p></div></div>
+    <section class="live-history-panel" data-disclosure-scope>
+        <header class="live-history-head"><div><h3>Warnings, errors, and system messages</h3><p>Newest first · scroll for older messages</p></div><div class="live-history-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".message-item">Expand</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".message-item">Collapse</button><a class="button secondary" asp-controller="Export" asp-action="Messages">CSV</a>@if (Model.IsAdmin) { <form asp-controller="Manage" asp-action="ClearMessages" method="post" data-live-clear data-clear-target="messages-list" data-confirm="Clear all warnings, errors, and system messages?"><button class="link-danger">Clear</button></form> }</div></header>
+        <div id="messages-list" data-live-list="messages" data-live-url="@Url.Action("MessagesPartial", "Home")">@await Html.PartialAsync("_MessagesList", Model)</div>
+    </section>
+    <section class="live-history-panel" data-disclosure-scope>
+        <header class="live-history-head"><div><h3>Chats</h3><p>Newest first · scroll for older chats</p></div><div class="live-history-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".chat-thread">Expand</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".chat-thread">Collapse</button><a class="button secondary" asp-controller="Export" asp-action="Chats">CSV</a>@if (Model.IsAdmin) { <form asp-controller="Manage" asp-action="ClearChats" method="post" data-live-clear data-clear-target="chats-list" data-confirm="Clear all saved chats?"><button class="link-danger">Clear</button></form> }</div></header>
+        <div id="chats-list" data-live-list="chats" data-live-url="@Url.Action("ChatsPartial", "Home")">@await Html.PartialAsync("_ChatsList", Model)</div>
+    </section>
 </section>
 
 @if (Model.IsAdmin)
 {
 <section id="tools" class="panel tab-panel">
+    <div class="section-title runtime-audit-title"><div><p class="eyebrow">AI TOOL AUDIT</p><h2>Tools</h2><p class="muted">Open a row to see exactly which project tool ran and what it returned.</p></div><div class="export-actions"><a class="button secondary" asp-controller="Export" asp-action="Tools">Export CSV</a><form asp-controller="AgentRuntime" asp-action="ClearAudit" method="post" onsubmit="return confirm('Clear the tool activity history?')"><button class="link-danger">Clear activity</button></form></div></div>
+    <div id="tool-audit-list" data-tool-audit-url="@Url.Action("ToolAuditPartial", "Home")">@await Html.PartialAsync("_ToolAuditList", Model)</div>
+</section>
+
+<section id="workspace" class="panel tab-panel">
     @await Html.PartialAsync("_ToolConfiguration", Model)
 </section>
 
 <section id="models" class="panel tab-panel">
-    <div class="section-title"><div><p class="eyebrow">OPENAI-COMPATIBLE ENDPOINTS</p><h2>Remote models</h2></div></div>
+    <div class="section-title"><div><p class="eyebrow">OPENAI-COMPATIBLE ENDPOINTS</p><h2>Remote models</h2></div><a class="button secondary" asp-controller="Export" asp-action="Models">Export CSV</a></div>
     <form asp-controller="Manage" asp-action="CreateModel" method="post" class="form-grid create-box open"><label>Display name<input name="name" required placeholder="Local Ollama" /></label><label>Model ID<input name="modelId" required placeholder="llama3.2" /></label><label class="wide">Base URL<input name="baseUrl" type="url" required placeholder="http://host.docker.internal:11434/v1" /></label><label class="wide">API key<input name="apiKey" type="password" autocomplete="off" placeholder="Optional for local models" /></label><label class="check"><input type="checkbox" name="isEnabled" value="true" checked /> Enabled</label><button>Add remote model</button></form>
     <div class="cards">@foreach (var m in Model.State.Models) { <div class="mini-card"><span class="status @(m.IsEnabled ? "online" : "")"></span><strong>@m.Name</strong><code>@m.ModelId</code><small>@m.BaseUrl</small><form asp-controller="Manage" asp-action="DeleteModel" method="post" onsubmit="return confirm('Delete this model?')"><input type="hidden" name="id" value="@m.Id"/><button class="link-danger">Delete</button></form></div> }</div>
 </section>
 
 <section id="github" class="panel tab-panel">
-    <div class="section-title"><div><p class="eyebrow">SOURCE CONTROL & AUTOMATION</p><h2>GitHub connections</h2></div></div>
+    <div class="section-title"><div><p class="eyebrow">SOURCE CONTROL & AUTOMATION</p><h2>GitHub connections</h2></div><a class="button secondary" asp-controller="Export" asp-action="GitHub">Export CSV</a></div>
     <details class="create-box"><summary>＋ Connect with fine-grained token</summary>
         <form asp-controller="GitHub" asp-action="ConnectToken" method="post" class="form-grid compact">
             <input type="hidden" name="returnUrl" value="/#github" />
@@ -159,7 +174,7 @@
 </section>
 
 <section id="access" class="panel tab-panel">
-    <div class="section-title"><div><p class="eyebrow">USERS & PERMISSIONS</p><h2>Access control</h2></div></div>
+    <div class="section-title"><div><p class="eyebrow">USERS & PERMISSIONS</p><h2>Access control</h2></div><a class="button secondary" asp-controller="Export" asp-action="Access">Export CSV</a></div>
     <form asp-controller="Manage" asp-action="CreateUser" method="post" class="form-grid create-box open"><label>Username<input name="username" required /></label><label>Password<input name="password" type="password" minlength="10" required /></label><label>Role<select name="role"><option value="Member">Member</option><option value="Admin">Admin</option></select></label><button>Create user</button></form>
     @foreach (var user in Model.State.Users)
     {

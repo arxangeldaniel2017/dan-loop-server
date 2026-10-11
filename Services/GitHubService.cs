@@ -149,7 +149,7 @@ public sealed class GitHubService(HttpClient http, IConfiguration configuration,
                ?? throw new InvalidOperationException("GitHub did not return an installation token.");
     }
 
-    public async Task<string> PushResultFolderAsync(GitHubConnection connection, GitHubRepository repository, string localFolder, string resultName, CancellationToken cancellationToken)
+    public async Task<string> PushResultFolderAsync(GitHubConnection connection, GitHubRepository repository, string localFolder, string projectFolder, string resultName, CancellationToken cancellationToken)
     {
         var token = await AccessTokenAsync(connection, cancellationToken);
         var repo = repository.FullName;
@@ -161,7 +161,7 @@ public sealed class GitHubService(HttpClient http, IConfiguration configuration,
         var parentSha = await GetReferenceShaAsync(repo, branch, token, cancellationToken);
         if (parentSha is null)
         {
-            parentSha = await InitializeRepositoryAsync(repo, localFolder, resultName, files[0], commitMessage, token, cancellationToken);
+            parentSha = await InitializeRepositoryAsync(repo, localFolder, projectFolder, resultName, files[0], commitMessage, token, cancellationToken);
             if (files.Count == 1) return $"https://github.com/{repo}/commit/{parentSha}";
         }
 
@@ -175,9 +175,56 @@ public sealed class GitHubService(HttpClient http, IConfiguration configuration,
             using var blob = await SendJsonAsync(HttpMethod.Post, $"repos/{repo}/git/blobs", token, new { content = Convert.ToBase64String(bytes), encoding = "base64" }, cancellationToken);
             var sha = blob.RootElement.GetProperty("sha").GetString();
             var relative = Path.GetRelativePath(localFolder, file).Replace('\\', '/');
-            treeEntries.Add(new { path = $"dan-loop-results/{resultName}/{relative}", mode = "100644", type = "blob", sha });
+            treeEntries.Add(new { path = $"{projectFolder}/results/{resultName}/{relative}", mode = "100644", type = "blob", sha });
         }
         using var tree = await SendJsonAsync(HttpMethod.Post, $"repos/{repo}/git/trees", token, new { base_tree = baseTree, tree = treeEntries }, cancellationToken);
+        var treeSha = tree.RootElement.GetProperty("sha").GetString();
+        using var newCommit = await SendJsonAsync(HttpMethod.Post, $"repos/{repo}/git/commits", token, new { message = commitMessage, tree = treeSha, parents = new[] { parentSha } }, cancellationToken);
+        var commitSha = newCommit.RootElement.GetProperty("sha").GetString()!;
+        using var updatedReference = await SendJsonAsync(HttpMethod.Patch, $"repos/{repo}/git/refs/heads/{branch}", token, new { sha = commitSha, force = false }, cancellationToken);
+        return $"https://github.com/{repo}/commit/{commitSha}";
+    }
+
+    public async Task<string> PushProjectFilesAsync(GitHubConnection connection, GitHubRepository repository, string projectRoot, IReadOnlyList<string> relativePaths, string projectFolder, string commitMessage, CancellationToken cancellationToken)
+    {
+        if (relativePaths.Count == 0) throw new InvalidOperationException("Choose at least one project file to publish.");
+        var root = Path.GetFullPath(projectRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var files = relativePaths.Select(relative =>
+        {
+            var normalized = relative.Replace('\\', '/').TrimStart('/');
+            var full = Path.GetFullPath(Path.Combine(projectRoot, normalized.Replace('/', Path.DirectorySeparatorChar)));
+            if (!full.StartsWith(root, StringComparison.Ordinal) || !File.Exists(full))
+                throw new InvalidOperationException($"Project file '{relative}' was not found or is outside the project workspace.");
+            return (Path: normalized, FullPath: full);
+        }).ToList();
+
+        var token = await AccessTokenAsync(connection, cancellationToken);
+        var repo = repository.FullName;
+        var branch = Uri.EscapeDataString(repository.DefaultBranch);
+        var parentSha = await GetReferenceShaAsync(repo, branch, token, cancellationToken);
+        if (parentSha is null)
+        {
+            var first = files[0];
+            var bytes = await File.ReadAllBytesAsync(first.FullPath, cancellationToken);
+            EnsurePushableSize(first.FullPath, bytes);
+            using var initialized = await SendJsonAsync(HttpMethod.Put, $"repos/{repo}/contents/{EscapeContentPath($"{projectFolder}/{first.Path}")}", token, new { message = commitMessage, content = Convert.ToBase64String(bytes) }, cancellationToken);
+            parentSha = initialized.RootElement.GetProperty("commit").GetProperty("sha").GetString()
+                        ?? throw new InvalidOperationException("GitHub initialized the repository without returning a commit SHA.");
+            files.RemoveAt(0);
+            if (files.Count == 0) return $"https://github.com/{repo}/commit/{parentSha}";
+        }
+
+        using var commit = await SendJsonAsync(HttpMethod.Get, $"repos/{repo}/git/commits/{parentSha}", token, null, cancellationToken);
+        var baseTree = commit.RootElement.GetProperty("tree").GetProperty("sha").GetString()!;
+        var entries = new List<object>();
+        foreach (var file in files)
+        {
+            var bytes = await File.ReadAllBytesAsync(file.FullPath, cancellationToken);
+            EnsurePushableSize(file.FullPath, bytes);
+            using var blob = await SendJsonAsync(HttpMethod.Post, $"repos/{repo}/git/blobs", token, new { content = Convert.ToBase64String(bytes), encoding = "base64" }, cancellationToken);
+            entries.Add(new { path = $"{projectFolder}/{file.Path}", mode = "100644", type = "blob", sha = blob.RootElement.GetProperty("sha").GetString() });
+        }
+        using var tree = await SendJsonAsync(HttpMethod.Post, $"repos/{repo}/git/trees", token, new { base_tree = baseTree, tree = entries }, cancellationToken);
         var treeSha = tree.RootElement.GetProperty("sha").GetString();
         using var newCommit = await SendJsonAsync(HttpMethod.Post, $"repos/{repo}/git/commits", token, new { message = commitMessage, tree = treeSha, parents = new[] { parentSha } }, cancellationToken);
         var commitSha = newCommit.RootElement.GetProperty("sha").GetString()!;
@@ -196,12 +243,12 @@ public sealed class GitHubService(HttpClient http, IConfiguration configuration,
         return reference.RootElement.GetProperty("object").GetProperty("sha").GetString();
     }
 
-    private async Task<string> InitializeRepositoryAsync(string repo, string localFolder, string resultName, string firstFile, string commitMessage, string token, CancellationToken cancellationToken)
+    private async Task<string> InitializeRepositoryAsync(string repo, string localFolder, string projectFolder, string resultName, string firstFile, string commitMessage, string token, CancellationToken cancellationToken)
     {
         var bytes = await File.ReadAllBytesAsync(firstFile, cancellationToken);
         EnsurePushableSize(firstFile, bytes);
         var relative = Path.GetRelativePath(localFolder, firstFile).Replace('\\', '/');
-        var path = EscapeContentPath($"dan-loop-results/{resultName}/{relative}");
+        var path = EscapeContentPath($"{projectFolder}/results/{resultName}/{relative}");
         using var initialized = await SendJsonAsync(HttpMethod.Put, $"repos/{repo}/contents/{path}", token, new { message = commitMessage, content = Convert.ToBase64String(bytes) }, cancellationToken);
         return initialized.RootElement.GetProperty("commit").GetProperty("sha").GetString()
                ?? throw new InvalidOperationException("GitHub initialized the repository without returning a commit SHA.");

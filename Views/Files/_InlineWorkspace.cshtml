@@ -1,0 +1,6 @@
+@model FileManagerViewModel
+<section class="inline-file-workspace" data-inline-file-workspace data-project-id="@Model.Project.Id" data-workspace-url="@Url.Action("WorkspacePartial", "Files")" data-browser-url="@Url.Action("BrowsePartial", "Files")" data-preview-url="@Url.Action("PreviewPartial", "Files")">
+    <header class="inline-workspace-head"><div><p class="eyebrow">PROJECT WORKSPACE</p><h2>@Model.Project.Name</h2><p class="muted" data-workspace-path>/@Model.Path</p></div></header>
+    <div data-file-browser-host>@await Html.PartialAsync("_FileBrowser", Model)</div>
+    <div data-file-preview-host hidden></div>
+</section>

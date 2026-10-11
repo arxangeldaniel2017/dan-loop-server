@@ -4,7 +4,10 @@
     var groups = jobs.GroupBy(job => job.LoopId is Guid loopId ? $"loop-{loopId:N}" : $"job-{job.Id:N}")
         .Select(group => new { Key = group.Key, Attempts = group.OrderByDescending(x => x.CreatedAt).ToList(), Latest = group.OrderByDescending(x => x.CreatedAt).First() })
         .OrderByDescending(group => group.Latest.CreatedAt).ToList();
-    var version = string.Join('|', jobs.Select(job => $"{job.Id:N}:{job.Status}:{job.StartedAt?.ToUnixTimeMilliseconds()}:{job.CompletedAt?.ToUnixTimeMilliseconds()}:{job.ResultsCommitUrl}:{job.ResultsPushError}"));
+    var visibleJobIds = jobs.Select(job => job.Id).ToHashSet();
+    var visibleAudits = Model.State.AgentRuntime.AuditTrail.Where(audit => visibleJobIds.Contains(audit.JobId)).OrderByDescending(audit => audit.StartedAt).ToList();
+    var auditVersion = string.Join('|', visibleAudits.Take(25).Select(audit => $"{audit.Id:N}:{audit.Status}:{audit.CompletedAt?.ToUnixTimeMilliseconds()}"));
+    var version = string.Join('|', jobs.Select(job => $"{job.Id:N}:{job.Status}:{job.StartedAt?.ToUnixTimeMilliseconds()}:{job.CompletedAt?.ToUnixTimeMilliseconds()}:{job.ResultsCommitUrl}:{job.ProjectCommitUrl}:{job.ProjectFilesChanged.Count}:{job.ResultsPushError}:{job.PlanStepId}")) + "|" + auditVersion;
     var visibleProjectIds = Model.VisibleProjects.Select(project => project.Id).ToHashSet();
     var runningJobs = jobs.Where(job => job.Status == JobStatuses.Running).OrderByDescending(job => job.StartedAt).ToList();
     var queuedJobs = jobs.Where(job => job.Status == JobStatuses.Queued).OrderBy(job => job.CreatedAt).ToList();
@@ -24,7 +27,8 @@
                 var active = runningJobs[0];
                 var activeLoop = active.LoopId is Guid activeLoopId ? Model.State.Loops.FirstOrDefault(loop => loop.Id == activeLoopId) : null;
                 var activeProject = Model.State.Projects.FirstOrDefault(project => project.Id == active.ProjectId);
-                <strong>In progress now</strong><span class="activity-message">@(activeLoop?.Name ?? activeProject?.Name): @active.Prompt</span>
+                var activeAudit = visibleAudits.FirstOrDefault(audit => audit.JobId == active.Id);
+                <strong>In progress now</strong><span class="activity-message">@(activeLoop?.Name ?? activeProject?.Name) · @(activeAudit is null ? "Waiting for the model" : $"{activeAudit.Tool}: {activeAudit.Summary}")</span>
             }
             else if (queuedJobs.Any())
             {
@@ -58,6 +62,7 @@
         var job = group.Latest;
         var project = Model.State.Projects.FirstOrDefault(x => x.Id == job.ProjectId);
         var loop = job.LoopId is Guid loopId ? Model.State.Loops.FirstOrDefault(x => x.Id == loopId) : null;
+        var jobAudits = visibleAudits.Where(audit => audit.JobId == job.Id).OrderByDescending(audit => audit.StartedAt).ToList();
         if (groupIndex + 1 < groups.Count)
         {
             var olderJob = groups[groupIndex + 1].Latest;
@@ -71,9 +76,18 @@
             <summary class="job-summary"><span class="job-status"><span class="running-dot" aria-hidden="true"></span><span class="badge @job.Status.ToLowerInvariant()">@job.Status</span></span><strong>@(loop?.Name ?? project?.Name)</strong><span class="job-prompt-preview">@job.Prompt</span><time class="smart-start" data-relative-time="@job.StartedAt?.ToString("O")" title="Started @(job.StartedAt?.ToLocalTime().ToString("F") ?? "waiting")">Started <span>@(job.StartedAt?.ToLocalTime().ToString("g") ?? "waiting")</span></time></summary>
             <div class="job-body">
                 <div class="job-timing"><span>Started <strong>@(job.StartedAt?.ToLocalTime().ToString("g") ?? "waiting")</strong></span><span>Ended <strong>@(job.CompletedAt?.ToLocalTime().ToString("g") ?? "running")</strong></span><span>Duration <strong>@Duration(job)</strong></span></div>
+                @if (!string.IsNullOrWhiteSpace(job.PlanStepTitle)) { <div class="job-assigned-step"><span>Assigned plan step</span><strong>@job.PlanStepTitle</strong></div> }
                 <p class="job-prompt">@job.Prompt</p>
                 @if (loop is not null) { <details class="job-attempts" data-disclosure-id="@group.Key-attempts"><summary>@group.Attempts.Count executions · retry messages</summary>@foreach (var attempt in group.Attempts) { <div class="attempt-row"><span class="badge @attempt.Status.ToLowerInvariant()">@attempt.Status</span><time>@attempt.CreatedAt.ToLocalTime().ToString("g")</time><span>@(attempt.Error.Length > 0 ? attempt.Error : attempt.ResultsPushError.Length > 0 ? attempt.ResultsPushError : "No error")</span><small>@Duration(attempt)</small></div> }</details> }
                 @if (!string.IsNullOrEmpty(job.Output)) { <details data-disclosure-id="@group.Key-output"><summary>View output</summary><pre>@job.Output</pre></details> }
+                @if (job.ProjectFilesChanged.Any())
+                {
+                    <details open data-disclosure-id="@group.Key-project-changes"><summary>@(job.Status == JobStatuses.Planned ? "Project plan created" : "Project files changed")</summary><div class="job-project-changes">@foreach (var path in job.ProjectFilesChanged) { <code>@path</code> }@if (!string.IsNullOrWhiteSpace(job.ProjectCommitUrl)) { <a href="@job.ProjectCommitUrl" target="_blank" rel="noopener">View project GitHub commit</a> }</div></details>
+                }
+                @if (jobAudits.Any())
+                {
+                    <details data-disclosure-id="@group.Key-tools"><summary>Tool activity · @jobAudits.Count calls</summary><div class="job-tool-activity">@foreach (var audit in jobAudits) { <div><span class="badge @audit.Status.ToLowerInvariant()">@audit.Status</span><code>@audit.Tool</code><span>@audit.Summary</span><time>@audit.StartedAt.ToLocalTime().ToString("g")</time></div> }</div></details>
+                }
                 @if (job.ResultItems.Any()) { <details data-disclosure-id="@group.Key-results"><summary>Result files</summary>@foreach (var result in job.ResultItems) { <div class="result-file"><a asp-controller="Files" asp-action="Preview" asp-route-projectId="@job.ProjectId" asp-route-path="@result.RelativePath" target="_blank">@(result.IsUndone ? "↩ " : "")@result.RelativePath</a>@if (!result.IsUndone) { <form asp-controller="Files" asp-action="UndoResult" method="post"><input type="hidden" name="jobId" value="@job.Id"/><input type="hidden" name="path" value="@result.RelativePath"/><button class="link-danger">Undo</button></form> }</div> }@if (job.ResultItems.Any(x => !x.IsUndone)) { <form asp-controller="Files" asp-action="UndoAll" method="post"><input type="hidden" name="jobId" value="@job.Id"/><button class="danger">Undo all result files</button></form> }@if (!string.IsNullOrWhiteSpace(job.ResultsCommitUrl)) { <a href="@job.ResultsCommitUrl" target="_blank" rel="noopener">View GitHub commit</a> }@if (!string.IsNullOrWhiteSpace(job.ResultsPushError)) { <p class="error">GitHub push failed: @job.ResultsPushError</p><form asp-controller="Manage" asp-action="RetryResultPush" method="post"><input type="hidden" name="id" value="@job.Id"/><button class="secondary">Retry GitHub push</button></form> }</details> }
                 @if (!string.IsNullOrEmpty(job.Error)) { <p class="error">@job.Error</p> }
                 <div class="actions">@if (job.Status is JobStatuses.Queued or JobStatuses.Running) { <form asp-controller="Manage" asp-action="CancelJob" method="post"><input type="hidden" name="id" value="@job.Id"/><button class="secondary">Cancel</button></form> }@if (Model.IsAdmin && job.Status != JobStatuses.Running) { <form asp-controller="Manage" asp-action="DeleteJob" method="post"><input type="hidden" name="id" value="@job.Id"/><button class="link-danger">Remove latest execution</button></form> }</div>

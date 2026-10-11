@@ -23,7 +23,6 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
         });
         var path = Path.Combine(_root, folder);
         Directory.CreateDirectory(path);
-        Directory.CreateDirectory(Path.Combine(path, "results"));
         return path;
     }
 
@@ -37,11 +36,15 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
             .Where(x => !IsInternal(x.Name))
             .Select(x => ToEntry(root, x))
             .OrderByDescending(x => x.IsDirectory).ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToList();
-        var conversations = await store.ReadAsync(state => state.Conversations.Where(x => x.ProjectId == project.Id).OrderByDescending(x => x.UpdatedAt).ToList());
-        return new FileManagerViewModel { Project = project, Path = normalized, Entries = entries, Conversations = conversations };
+        var stateView = await store.ReadAsync(state => new
+        {
+            Conversations = state.Conversations.Where(x => x.ProjectId == project.Id).OrderByDescending(x => x.UpdatedAt).ToList(),
+            CanPublish = state.AgentRuntime.Settings.AllowGitHubPublish && state.ProjectRepositories.Any(link => link.ProjectId == project.Id)
+        });
+        return new FileManagerViewModel { Project = project, Path = normalized, Entries = entries, Conversations = stateView.Conversations, CanPublishToGitHub = stateView.CanPublish };
     }
 
-    public async Task<PendingUpload> StageAsync(Guid projectId, Guid userId, IReadOnlyList<IFormFile> files)
+    public async Task<PendingUpload> StageAsync(Guid projectId, Guid userId, IReadOnlyList<IFormFile> files, string? basePath = null)
     {
         if (files.Count == 0) throw new InvalidOperationException("Choose at least one file.");
         if (files.Sum(x => x.Length) > MaxUploadBytes) throw new InvalidOperationException("The upload exceeds the 250 MB limit.");
@@ -51,7 +54,7 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
         foreach (var file in files)
         {
             if (file.Length <= 0) continue;
-            var relative = NormalizeRelativePath(file.FileName);
+            var relative = NormalizeRelativePath(Path.Combine(basePath ?? "", file.FileName));
             var stagedName = Guid.NewGuid().ToString("N");
             await using var target = File.Create(Path.Combine(staging, stagedName));
             await file.CopyToAsync(target);
@@ -88,6 +91,7 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
     public async Task CommitPendingAsync(PendingUpload upload, string conflictAction, bool extractZips)
     {
         var root = await GetProjectRootAsync(upload.ProjectId);
+        var userPaths = new List<string>();
         if (conflictAction == "cancel") { await CancelPendingAsync(upload.Id); return; }
         foreach (var item in upload.Items)
         {
@@ -100,6 +104,7 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
             }
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
             File.Move(Path.Combine(StagingPath(upload.Id), item.StagedName), destination);
+            userPaths.Add(Path.GetRelativePath(root, destination).Replace('\\', '/'));
             if (extractZips && item.IsZip)
             {
                 var extract = Path.Combine(Path.GetDirectoryName(destination)!, Path.GetFileNameWithoutExtension(destination));
@@ -109,9 +114,12 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
                     else if (conflictAction == "override") DeleteExisting(extract);
                 }
                 ExtractZipSafely(destination, extract);
+                userPaths.AddRange(Directory.EnumerateFiles(extract, "*", SearchOption.AllDirectories)
+                    .Select(file => Path.GetRelativePath(root, file).Replace('\\', '/')));
             }
         }
         await RemovePendingAsync(upload.Id);
+        await MarkUserManagedAsync(upload.ProjectId, userPaths);
     }
 
     public async Task CancelPendingAsync(Guid id)
@@ -202,6 +210,111 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
             .OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Take(500).ToList();
     }
 
+    public async Task<IReadOnlyList<string>> ExpandSelectionToFilesAsync(Guid projectId, IEnumerable<string> relativePaths)
+    {
+        var root = await GetProjectRootAsync(projectId);
+        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var relative in relativePaths.Where(path => !string.IsNullOrWhiteSpace(path)))
+        {
+            var normalized = NormalizeRelativePath(relative);
+            var full = Resolve(root, normalized);
+            if (File.Exists(full)) files.Add(normalized);
+            else if (Directory.Exists(full))
+                foreach (var file in Directory.EnumerateFiles(full, "*", SearchOption.AllDirectories))
+                {
+                    var path = Path.GetRelativePath(root, file).Replace('\\', '/');
+                    if (!path.Split('/').Any(IsInternal)) files.Add(path);
+                }
+        }
+        return files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).Take(500).ToList();
+    }
+
+    public async Task<PreparedDownload> PrepareDownloadAsync(Guid projectId, string projectName, IReadOnlyList<string> relativePaths, CancellationToken cancellationToken)
+    {
+        if (relativePaths.Count == 0) throw new InvalidOperationException("Select at least one file or folder.");
+        var root = await GetProjectRootAsync(projectId);
+        var selected = relativePaths.Select(path => NormalizeRelativePath(path)).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(path => new { Relative = path, Full = Resolve(root, path) })
+            .Where(item => File.Exists(item.Full) || Directory.Exists(item.Full)).ToList();
+        if (selected.Count == 0) throw new FileNotFoundException("The selected files or folders no longer exist.");
+        foreach (var item in selected) EnsureDownloadPath(item.Full);
+
+        if (selected.Count == 1 && File.Exists(selected[0].Full))
+            return new PreparedDownload { FilePath = selected[0].Full, DownloadName = Path.GetFileName(selected[0].Full), FileCount = 1 };
+
+        var downloadRoot = Path.Combine(_root, ".downloads");
+        Directory.CreateDirectory(downloadRoot);
+        var archivePath = Path.Combine(downloadRoot, Guid.NewGuid().ToString("N") + ".zip");
+        var fileCount = 0;
+        try
+        {
+            await using var output = new FileStream(archivePath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, useAsync: true);
+            using var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true);
+            foreach (var item in selected)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var archiveRoot = Path.GetFileName(item.Relative.TrimEnd('/'));
+                if (File.Exists(item.Full))
+                {
+                    await AddZipFileAsync(archive, item.Full, archiveRoot, cancellationToken);
+                    fileCount++;
+                    continue;
+                }
+
+                var files = EnumerateDownloadFiles(item.Full).ToList();
+                archive.CreateEntry(archiveRoot.TrimEnd('/') + "/");
+                foreach (var directory in EnumerateDownloadDirectories(item.Full))
+                {
+                    var inside = Path.GetRelativePath(item.Full, directory).Replace('\\', '/');
+                    archive.CreateEntry($"{archiveRoot}/{inside}/");
+                }
+                foreach (var file in files)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var inside = Path.GetRelativePath(item.Full, file).Replace('\\', '/');
+                    await AddZipFileAsync(archive, file, $"{archiveRoot}/{inside}", cancellationToken);
+                    fileCount++;
+                }
+            }
+            var baseName = selected.Count == 1 ? Path.GetFileName(selected[0].Relative.TrimEnd('/')) : SafeSegment(projectName) + "-selection";
+            return new PreparedDownload { FilePath = archivePath, DownloadName = $"{baseName}.zip", IsTemporary = true, FileCount = fileCount };
+        }
+        catch
+        {
+            if (File.Exists(archivePath)) File.Delete(archivePath);
+            throw;
+        }
+    }
+
+    public Task MarkUserManagedAsync(Guid projectId, IEnumerable<string> relativePaths) => store.UpdateAsync(state =>
+    {
+        var project = state.Projects.First(project => project.Id == projectId);
+        var userPaths = project.UserManagedPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var pending = project.AutoPublishPendingPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in relativePaths.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => NormalizeRelativePath(path)))
+        {
+            userPaths.Add(path);
+            pending.Remove(path);
+        }
+        project.UserManagedPaths = userPaths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
+        project.AutoPublishPendingPaths = pending.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
+        if (project.AutoPublishPendingPaths.Count == 0) project.AutoPublishQueuedAt = null;
+        return true;
+    });
+
+    public Task QueueAiGeneratedAsync(Guid projectId, IEnumerable<string> relativePaths, bool publishSoon = false) => store.UpdateAsync(state =>
+    {
+        var project = state.Projects.First(project => project.Id == projectId);
+        var userPaths = project.UserManagedPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var pending = project.AutoPublishPendingPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in relativePaths.Where(path => !string.IsNullOrWhiteSpace(path)).Select(path => NormalizeRelativePath(path)))
+            if (!userPaths.Contains(path)) pending.Add(path);
+        project.AutoPublishPendingPaths = pending.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
+        if (project.AutoPublishPendingPaths.Count > 0)
+            project.AutoPublishQueuedAt = publishSoon ? DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5) : project.AutoPublishQueuedAt ?? DateTimeOffset.UtcNow;
+        return true;
+    });
+
     public async Task<int> MoveToTrashAsync(Guid projectId, IEnumerable<string> relativePaths)
     {
         var root = await GetProjectRootAsync(projectId);
@@ -220,6 +333,56 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
         }
         return moved;
     }
+
+    public async Task<IReadOnlyList<(string Source, string Destination)>> MoveItemsAsync(Guid projectId, IEnumerable<string> relativePaths, string destinationPath)
+    {
+        var root = await GetProjectRootAsync(projectId);
+        var destinationRelative = NormalizeRelativePath(destinationPath, allowEmpty: true);
+        var destinationFolder = Resolve(root, destinationRelative);
+        if (!Directory.Exists(destinationFolder)) throw new DirectoryNotFoundException("The destination folder no longer exists.");
+        var planned = new List<(string SourceRelative, string Source)>();
+        foreach (var relativePath in relativePaths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var sourceRelative = NormalizeRelativePath(relativePath);
+            var source = Resolve(root, sourceRelative);
+            if (!File.Exists(source) && !Directory.Exists(source)) throw new FileNotFoundException($"{sourceRelative} no longer exists.");
+            var sourceParent = Path.GetDirectoryName(sourceRelative)?.Replace('\\', '/') ?? "";
+            if (string.Equals(sourceParent, destinationRelative, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"{Path.GetFileName(sourceRelative)} is already in that folder.");
+            if (Directory.Exists(source) && (string.Equals(destinationRelative, sourceRelative, StringComparison.OrdinalIgnoreCase) || destinationRelative.StartsWith(sourceRelative + "/", StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("A folder cannot be moved into itself or one of its subfolders.");
+            planned.Add((sourceRelative, source));
+        }
+        if (planned.Count == 0) throw new InvalidOperationException("Nothing was moved.");
+        var moves = new List<(string Source, string Destination)>();
+        foreach (var item in planned)
+        {
+            var destination = Path.Combine(destinationFolder, Path.GetFileName(item.Source));
+            if (File.Exists(destination) || Directory.Exists(destination)) destination = UniquePath(destination);
+            if (File.Exists(item.Source)) File.Move(item.Source, destination); else Directory.Move(item.Source, destination);
+            moves.Add((item.SourceRelative, Path.GetRelativePath(root, destination).Replace('\\', '/')));
+        }
+        await store.UpdateAsync(state =>
+        {
+            var project = state.Projects.First(project => project.Id == projectId);
+            project.UserManagedPaths = RewriteMovedPaths(project.UserManagedPaths, moves);
+            project.AutoPublishPendingPaths = RewriteMovedPaths(project.AutoPublishPendingPaths, moves);
+            foreach (var job in state.Jobs.Where(job => job.ProjectId == projectId))
+            {
+                job.ProjectFilesChanged = RewriteMovedPaths(job.ProjectFilesChanged, moves);
+                job.PublishedProjectFiles = RewriteMovedPaths(job.PublishedProjectFiles, moves);
+            }
+            return true;
+        });
+        return moves;
+    }
+
+    private static List<string> RewriteMovedPaths(IEnumerable<string> paths, IReadOnlyList<(string Source, string Destination)> moves)
+        => paths.Select(path =>
+        {
+            var move = moves.FirstOrDefault(item => string.Equals(path, item.Source, StringComparison.OrdinalIgnoreCase) || path.StartsWith(item.Source + "/", StringComparison.OrdinalIgnoreCase));
+            return string.IsNullOrEmpty(move.Source) ? path : move.Destination + path[move.Source.Length..];
+        }).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
 
     public async Task<string> ImportRepositoryAsync(Guid projectId, string fullName, byte[] archive)
     {
@@ -268,8 +431,65 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
     }
 
     private string StagingPath(Guid id) => Path.Combine(_root, ".staging", id.ToString("N"));
-    private Task RemovePendingAsync(Guid id) => store.UpdateAsync(state => { state.PendingUploads.RemoveAll(x => x.Id == id); return true; });
+    private async Task RemovePendingAsync(Guid id)
+    {
+        var staging = StagingPath(id);
+        if (Directory.Exists(staging)) Directory.Delete(staging, true);
+        await store.UpdateAsync(state => { state.PendingUploads.RemoveAll(x => x.Id == id); return true; });
+    }
     private static bool IsInternal(string name) => name is ".staging" or ".trash" or ".history" or ".undo";
+
+    private static void EnsureDownloadPath(string path)
+    {
+        if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidOperationException("Symbolic links cannot be downloaded because they may point outside the project.");
+    }
+
+    private static IEnumerable<string> EnumerateDownloadFiles(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            EnsureDownloadPath(directory);
+            foreach (var file in Directory.EnumerateFiles(directory))
+            {
+                EnsureDownloadPath(file);
+                yield return file;
+            }
+            foreach (var child in Directory.EnumerateDirectories(directory))
+            {
+                EnsureDownloadPath(child);
+                pending.Push(child);
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateDownloadDirectories(string root)
+    {
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            foreach (var child in Directory.EnumerateDirectories(directory))
+            {
+                EnsureDownloadPath(child);
+                yield return child;
+                pending.Push(child);
+            }
+        }
+    }
+
+    private static async Task AddZipFileAsync(ZipArchive archive, string sourcePath, string entryName, CancellationToken cancellationToken)
+    {
+        var entry = archive.CreateEntry(entryName.Replace('\\', '/'), CompressionLevel.Fastest);
+        entry.LastWriteTime = File.GetLastWriteTimeUtc(sourcePath);
+        await using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 128 * 1024, useAsync: true);
+        await using var target = entry.Open();
+        await source.CopyToAsync(target, cancellationToken);
+    }
 
     public static string NormalizeRelativePath(string value, bool allowEmpty = false)
     {
@@ -283,7 +503,7 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
     private static string SafeSegment(string value)
     {
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
-        var safe = new string(value.Select(c => invalid.Contains(c) || char.IsControl(c) ? '_' : c).ToArray()).Trim().Trim('.');
+        var safe = new string(value.Select(c => invalid.Contains(c) || char.IsControl(c) ? '_' : c).ToArray()).Trim();
         return string.IsNullOrWhiteSpace(safe) ? "item" : safe;
     }
 

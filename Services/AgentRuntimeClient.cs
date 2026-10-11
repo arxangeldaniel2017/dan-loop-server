@@ -11,16 +11,20 @@ public sealed class AgentRuntimeClient(HttpClient http, IDataProtectionProvider 
 {
     private readonly IDataProtector _protector = protectionProvider.CreateProtector("remote-model-api-keys-v1");
 
-    public async Task<AgentModelStep> CompleteStepAsync(RemoteModel model, IReadOnlyList<object> messages, AgentRuntimeSettings settings, CancellationToken cancellationToken)
+    public async Task<AgentModelStep> CompleteStepAsync(RemoteModel model, IReadOnlyList<object> messages, AgentRuntimeSettings settings, CancellationToken cancellationToken, IReadOnlySet<string>? allowedTools = null, string? requiredTool = null, bool requireAnyTool = false, bool? streamOverride = null, int? maxTokensOverride = null)
     {
+        var useStreaming = streamOverride ?? settings.UseStreaming;
+        object toolChoice = requiredTool is not null
+            ? new { type = "function", function = new { name = requiredTool } }
+            : requireAnyTool ? "required" : "auto";
         var payload = new
         {
             model = model.ModelId,
             messages,
-            tools = AgentToolExecutor.ToolDefinitions(),
-            tool_choice = "auto",
-            stream = settings.UseStreaming,
-            max_tokens = Math.Clamp(settings.MaxOutputTokens, 32, 32_768),
+            tools = AgentToolExecutor.ToolDefinitions(settings, allowedTools),
+            tool_choice = toolChoice,
+            stream = useStreaming,
+            max_tokens = Math.Clamp(maxTokensOverride ?? settings.MaxOutputTokens, 32, 32_768),
             temperature = 0.2
         };
         using var request = new HttpRequestMessage(HttpMethod.Post, model.BaseUrl.TrimEnd('/') + "/chat/completions") { Content = JsonContent.Create(payload) };
@@ -31,7 +35,7 @@ public sealed class AgentRuntimeClient(HttpClient http, IDataProtectionProvider 
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             throw new InvalidOperationException($"Remote model returned {(int)response.StatusCode}: {body[..Math.Min(body.Length, 1000)]}");
         }
-        return settings.UseStreaming
+        return useStreaming
             ? await ReadStreamingAsync(response, cancellationToken)
             : ParseComplete(await response.Content.ReadAsStringAsync(cancellationToken));
     }

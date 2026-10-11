@@ -10,13 +10,9 @@ public sealed class AgentRuntimeController(StateStore store) : Controller
 {
     [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> Update(
-        bool enabled, bool useStreaming, bool allowFileRead, bool allowFileWrite, bool allowCommands,
-        bool allowGitCommit, bool allowGitPush, int maxSteps, int maxOutputTokens,
-        int commandTimeoutSeconds, int maxToolOutputCharacters, List<string>? allowedCommands, string? customCommands)
+        bool enabled, bool useStreaming, bool allowFileRead, bool allowFileWrite, bool allowGitHubPublish,
+        int maxSteps, int maxOutputTokens, int maxToolOutputCharacters)
     {
-        var commands = (allowedCommands ?? []).Concat((customCommands ?? "").Split(['\r', '\n', ',', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .Select(command => Path.GetFileName(command) ?? "").Where(command => command.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase).Take(100).ToList();
         await store.UpdateAsync(state =>
         {
             state.AgentRuntime.Settings = new AgentRuntimeSettings
@@ -25,34 +21,38 @@ public sealed class AgentRuntimeController(StateStore store) : Controller
                 UseStreaming = useStreaming,
                 AllowFileRead = allowFileRead,
                 AllowFileWrite = allowFileWrite,
-                AllowCommands = allowCommands,
-                AllowGitCommit = allowGitCommit,
-                AllowGitPush = allowGitPush,
+                AllowGitHubPublish = allowGitHubPublish,
                 MaxSteps = Math.Clamp(maxSteps, 1, 50),
                 MaxOutputTokens = Math.Clamp(maxOutputTokens, 32, 32_768),
-                CommandTimeoutSeconds = Math.Clamp(commandTimeoutSeconds, 5, 600),
-                MaxToolOutputCharacters = Math.Clamp(maxToolOutputCharacters, 1000, 100_000),
-                AllowedCommands = commands
+                MaxToolOutputCharacters = Math.Clamp(maxToolOutputCharacters, 1000, 100_000)
             };
+            state.Messages.Add(new AppMessage { Level = MessageLevels.Info, Text = "Advanced AI workspace configuration saved." });
             return true;
         });
-        TempData["Message"] = "Advanced tool configuration saved.";
         return Redirect("/#tools");
     }
 
     [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> RestoreDefaults()
     {
-        await store.UpdateAsync(state => { state.AgentRuntime.Settings = new AgentRuntimeSettings(); return true; });
-        TempData["Message"] = "Secure tool defaults restored.";
+        await store.UpdateAsync(state =>
+        {
+            state.AgentRuntime.Settings = new AgentRuntimeSettings();
+            state.Messages.Add(new AppMessage { Level = MessageLevels.Info, Text = "Secure AI workspace defaults restored." });
+            return true;
+        });
         return Redirect("/#tools");
     }
 
     [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> ClearAudit()
     {
-        await store.UpdateAsync(state => { state.AgentRuntime.AuditTrail.Clear(); return true; });
-        TempData["Message"] = "Tool activity history cleared.";
+        await store.UpdateAsync(state =>
+        {
+            state.AgentRuntime.AuditTrail.Clear();
+            state.Messages.Add(new AppMessage { Level = MessageLevels.Info, Text = "Tool activity history cleared." });
+            return true;
+        });
         return Redirect("/#tools");
     }
 }

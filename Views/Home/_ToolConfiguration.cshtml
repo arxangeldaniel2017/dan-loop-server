@@ -1,48 +1,45 @@
 @model DashboardViewModel
 @{
     var settings = Model.State.AgentRuntime.Settings;
-    var catalogNames = AgentCommandCatalog.Options.Select(option => option.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    var customCommands = settings.AllowedCommands.Where(command => !catalogNames.Contains(command)).ToList();
-    bool IsInstalled(string command)
-    {
-        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-        return path.Split(System.IO.Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).Any(folder => File.Exists(System.IO.Path.Combine(folder, command)));
-    }
 }
-<div class="section-title"><div><p class="eyebrow">ADVANCED CONFIGURATION</p><h2>Tool configuration <span class="advanced-badge">Advanced</span></h2><p class="muted">Secure defaults are already active. Most users do not need to change these settings.</p></div><form asp-controller="AgentRuntime" asp-action="RestoreDefaults" method="post"><button class="secondary">Restore secure defaults</button></form></div>
-<div class="runtime-defaults"><strong>Default behavior</strong><span>Read and edit project files</span><span>Run approved builds and tests</span><span>Create local Git commits</span><span>Allow normal Git pushes</span><span class="blocked">Block force operations, destructive commands, secrets, and paths outside the workspace</span></div>
-<details class="create-box runtime-settings"><summary>Edit advanced runtime policy</summary>
-    <form asp-controller="AgentRuntime" asp-action="Update" method="post" class="form-grid compact">
-        <label class="check"><input type="checkbox" name="enabled" value="true" checked="@settings.Enabled"/> Enable agent tool runtime</label>
-        <label class="check"><input type="checkbox" name="useStreaming" value="true" checked="@settings.UseStreaming"/> Stream model responses</label>
-        <label class="check"><input type="checkbox" name="allowFileRead" value="true" checked="@settings.AllowFileRead"/> Read workspace files</label>
-        <label class="check"><input type="checkbox" name="allowFileWrite" value="true" checked="@settings.AllowFileWrite"/> Edit workspace files</label>
-        <label class="check"><input type="checkbox" name="allowCommands" value="true" checked="@settings.AllowCommands"/> Run approved commands</label>
-        <label class="check"><input type="checkbox" name="allowGitCommit" value="true" checked="@settings.AllowGitCommit"/> Create local Git commits</label>
-        <label class="check"><input type="checkbox" name="allowGitPush" value="true" checked="@settings.AllowGitPush"/> Allow normal Git pushes</label>
-        <label>Maximum agent steps<input type="number" name="maxSteps" min="1" max="50" value="@settings.MaxSteps"/></label>
-        <label>Maximum output tokens<input type="number" name="maxOutputTokens" min="32" max="32768" value="@settings.MaxOutputTokens"/><small class="field-help">Maximum text the model may return in each reasoning/tool step. It does not limit prompt size or the number of steps. Higher values help with long code and reports, but take longer to generate.</small></label>
-        <label>Command timeout (seconds)<input type="number" name="commandTimeoutSeconds" min="5" max="600" value="@settings.CommandTimeoutSeconds"/></label>
-        <label>Tool output limit (characters)<input type="number" name="maxToolOutputCharacters" min="1000" max="100000" value="@settings.MaxToolOutputCharacters"/></label>
-        <fieldset class="wide command-manager">
-            <legend>Allowed command manager</legend>
-            <p class="form-help">Select a command to add it; deselect it to remove it. “Power tool” commands can run project code, install dependencies, access networks, or control external systems.</p>
-            @foreach (var group in AgentCommandCatalog.Options.GroupBy(option => option.Category))
-            {
-                <section class="command-category"><h4>@group.Key</h4><div class="command-options">
-                    @foreach (var option in group)
-                    {
-                        var selected = settings.AllowedCommands.Contains(option.Name, StringComparer.OrdinalIgnoreCase);
-                        var installed = IsInstalled(option.Name);
-                        <label class="command-option @(option.IsPowerTool ? "power" : "")"><input type="checkbox" name="allowedCommands" value="@option.Name" checked="@selected"/><span><strong>@option.Name</strong><small>@option.Description</small></span><em class="@(installed ? "installed" : "unavailable")">@(installed ? "Installed" : "Not found")</em>@if (option.IsPowerTool) { <b>Power tool</b> }</label>
-                    }
-                </div></section>
-            }
-            <label class="custom-commands">Custom command names<textarea name="customCommands" rows="2" placeholder="One executable name per line">@string.Join("\n", customCommands)</textarea><small class="field-help">Custom entries are advanced. Paths are removed; permanently blocked command names remain blocked.</small></label>
-        </fieldset>
-        <p class="wide form-help">Git init, status, diff, log, show, branch, ls-files, grep, remote and tag are supported. Commits and normal pushes follow the switches above. Force pushes, destructive Git operations, shell substitutions, redirections, internal folders, and paths outside the project workspace remain blocked.</p>
-        <button>Save advanced configuration</button>
+<div class="section-title"><div><p class="eyebrow">ADVANCED CONFIGURATION</p><h2>AI workspace access <span class="advanced-badge">Advanced</span></h2><p class="muted">The agent is restricted to this project's files. It cannot open a terminal or run anything on the server.</p></div><form asp-controller="AgentRuntime" asp-action="RestoreDefaults" method="post"><button class="secondary">Restore secure defaults</button></form></div>
+<div class="runtime-defaults">
+    <strong>Fixed safety boundary <span class="advanced-badge">Not configurable</span></strong>
+    <span>Project files only</span><span>Relative paths only</span><span>Structured file tools</span><span>GitHub API only when connected</span>
+    <span class="blocked">No Bash, terminal, commands, builds, tests, local Git, server browsing, or outside paths</span>
+    <p>There is no server-command allowlist. This boundary always stays active; the settings below only add or remove safe project tools.</p>
+</div>
+
+<details class="create-box runtime-settings"><summary>Edit advanced workspace policy</summary>
+    <form asp-controller="AgentRuntime" asp-action="Update" method="post" class="runtime-policy-form" data-runtime-policy-form>
+        <section class="runtime-form-section"><h3>Capabilities</h3><div class="runtime-toggle-grid">
+            <label class="check"><input type="checkbox" name="enabled" value="true" checked="@settings.Enabled" data-runtime-capability/> Enable AI file tools</label>
+            <label class="check"><input type="checkbox" name="allowFileRead" value="true" checked="@settings.AllowFileRead" data-runtime-capability/> Read project files</label>
+            <label class="check"><input type="checkbox" name="allowFileWrite" value="true" checked="@settings.AllowFileWrite" data-runtime-capability/> Edit project files</label>
+            <label class="check"><input type="checkbox" name="useStreaming" value="true" checked="@settings.UseStreaming"/> Stream model responses</label>
+            <label class="check runtime-toggle-wide"><input type="checkbox" name="allowGitHubPublish" value="true" checked="@settings.AllowGitHubPublish" data-runtime-capability/> Allow background GitHub sync and manual selected publishing</label>
+        </div></section>
+        <section class="runtime-form-section"><h3>Execution limits</h3><div class="runtime-limit-grid">
+            <label>Maximum agent steps<input type="number" name="maxSteps" min="1" max="50" value="@settings.MaxSteps"/><small class="field-help">Maximum tool-and-model cycles for one job.</small></label>
+            <label>Maximum output tokens<input type="number" name="maxOutputTokens" min="32" max="32768" value="@settings.MaxOutputTokens"/><small class="field-help">Maximum model response size per step. Default: 16,384.</small></label>
+            <label>Tool output limit<input type="number" name="maxToolOutputCharacters" min="1000" max="100000" value="@settings.MaxToolOutputCharacters"/><small class="field-help">Maximum characters returned by one file tool.</small></label>
+        </div></section>
+        <p class="runtime-policy-note">GitHub publishing works only for a repository assigned under the GitHub tab and while that connection has write permission. AI-created changes are grouped into background commits; user uploads and user edits are excluded unless selected in the file manager. Every project is stored under its own repository folder. It never enables terminal or local Git access.</p>
+        <div class="runtime-form-actions"><button>Save advanced configuration</button></div>
     </form>
 </details>
-<div class="section-title runtime-audit-title"><div><p class="eyebrow">LIVE AUDIT TRAIL</p><h3>Recent tool activity</h3></div><form asp-controller="AgentRuntime" asp-action="ClearAudit" method="post" onsubmit="return confirm('Clear the tool activity history?')"><button class="link-danger">Clear activity</button></form></div>
-<div id="tool-audit-list" data-tool-audit-url="@Url.Action("ToolAuditPartial", "Home")">@await Html.PartialAsync("_ToolAuditList", Model)</div>
+
+<section class="allowed-tools-section" data-allowed-tools>
+    <div class="section-title allowed-tools-title">
+        <div><p class="eyebrow">CURRENT PERMISSIONS</p><h3>Allowed tools <span class="allowed-tool-count" data-allowed-tool-count></span></h3><p class="muted">These are structured project tools—not server commands. Selecting or clearing a capability previews the exact list immediately; save to apply it to jobs.</p></div>
+    </div>
+    <div class="tool-policy-grid">
+        <article data-tool-policy data-requires="enabled"><code>workspace_guide</code><strong>Workspace guide</strong><p>Explains the logical project root, top-level project entries, currently available tools, and assigned GitHub destination.</p></article>
+        <article data-tool-policy data-requires="enabled,allowFileRead"><code>browse_folder</code><strong>Browse project folder</strong><p>Shows one folder through a safe project API. It cannot browse the server or use a file-list command.</p></article>
+        <article data-tool-policy data-requires="enabled,allowFileRead"><code>read_file</code><strong>Read any project file</strong><p>Returns text directly and binary files as bounded Base64 chunks. Absolute paths and protected internal folders are rejected.</p></article>
+        <article data-tool-policy data-requires="enabled,allowFileWrite"><code>write_file</code><strong>Write project file</strong><p>Creates or replaces one project text file and backs up existing content first.</p></article>
+        <article data-tool-policy data-requires="enabled,allowFileWrite"><code>replace_in_file</code><strong>Replace text in project file</strong><p>Changes one exact, unambiguous text occurrence without executing a script or command.</p></article>
+        <article data-tool-policy data-requires="enabled,allowGitHubPublish"><code>publish_project_files</code><strong>Publish through GitHub</strong><p>Commits selected files through the connected GitHub API. It uses no shell, Git executable, or local repository.</p></article>
+    </div>
+    <div class="allowed-tools-empty" data-allowed-tools-empty hidden><strong>AI file tools are disabled</strong><p>Jobs can still ask the model for text, but no project workspace tools will be sent to it.</p></div>
+</section>

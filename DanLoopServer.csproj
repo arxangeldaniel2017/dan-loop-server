@@ -7,8 +7,23 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="AWSSDK.S3" Version="4.0.104.2" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="MySqlConnector" Version="2.6.2" />
     <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Data/ai-connections.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Runtime project workspaces may contain complete source trees. They must never
+         participate in the control-plane build or be copied into published output. -->
+    <Compile Remove="data/**" />
+    <Content Remove="data/**" />
+    <EmbeddedResource Remove="data/**" />
+    <None Remove="data/**" />
   </ItemGroup>
 
 </Project>

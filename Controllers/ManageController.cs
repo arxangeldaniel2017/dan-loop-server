@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace DanLoopServer.Controllers;
 
 [Authorize]
-public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, WorkspaceService workspace, GitHubService gitHub) : Controller
+public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, WorkspaceService workspace, GitHubService gitHub, ProjectPlanService plans) : Controller
 {
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId)
@@ -29,7 +29,7 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> DeleteProject(Guid id)
     {
-        await store.UpdateAsync(state => { state.Projects.RemoveAll(x => x.Id == id); state.Loops.RemoveAll(x => x.ProjectId == id); state.Jobs.RemoveAll(x => x.ProjectId == id); state.Permissions.RemoveAll(x => x.ProjectId == id); state.ProjectRepositories.RemoveAll(x => x.ProjectId == id); return true; });
+        await store.UpdateAsync(state => { state.Projects.RemoveAll(x => x.Id == id); state.Loops.RemoveAll(x => x.ProjectId == id); state.Jobs.RemoveAll(x => x.ProjectId == id); state.Permissions.RemoveAll(x => x.ProjectId == id); state.ProjectRepositories.RemoveAll(x => x.ProjectId == id); state.ExecutionPlans.RemoveAll(x => x.ProjectId == id); return true; });
         return Back("Project and its loops/jobs deleted.");
     }
 
@@ -107,6 +107,31 @@ public sealed class ManageController(StateStore store, PasswordService passwords
         return Back("Job cancelled.");
     }
 
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> SetPlanStepRetryLimit(Guid projectId, Guid stepId, int? retryLimit)
+    {
+        if (!await CanAsync(projectId, manage: true)) return Forbid();
+        if (retryLimit is <= 0) return Back("Retry limit must be a positive number or blank for unlimited.");
+        await plans.SetRetryLimitAsync(projectId, stepId, retryLimit);
+        return Back(retryLimit is null ? "Step retries are unlimited." : $"Step retry limit set to {retryLimit}.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> RetryPlanStep(Guid projectId, Guid stepId)
+    {
+        if (!await CanAsync(projectId, manage: true)) return Forbid();
+        await plans.RetryAsync(projectId, stepId);
+        return Back("Step queued for another attempt.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> SkipPlanStep(Guid projectId, Guid stepId)
+    {
+        if (!await CanAsync(projectId, manage: true)) return Forbid();
+        await plans.SkipAsync(projectId, stepId);
+        return Back("Step skipped. The next eligible step can continue.");
+    }
+
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> DeleteJob(Guid id)
     {
@@ -139,6 +164,15 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     }
 
     [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> ClearChats(Guid? projectId)
+    {
+        if (projectId is not null && !await CanAsync(projectId.Value, manage: true)) return Forbid();
+        if (projectId is null && !User.IsInRole(Roles.Admin)) return Forbid();
+        var removed = await store.UpdateAsync(state => state.Conversations.RemoveAll(item => projectId is null || item.ProjectId == projectId));
+        return Back($"Cleared {removed} chats.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> RetryResultPush(Guid id, CancellationToken cancellationToken)
     {
         var job = await store.ReadAsync(s => s.Jobs.FirstOrDefault(x => x.Id == id));
@@ -150,7 +184,7 @@ public sealed class ManageController(StateStore store, PasswordService passwords
         {
             var project = state.Projects.FirstOrDefault(x => x.Id == job.ProjectId);
             return project?.ResultsRepositoryId is long repositoryId
-                ? state.GitHubConnections.SelectMany(connection => connection.Repositories.Select(repository => new { Connection = connection, Repository = repository })).FirstOrDefault(x => x.Repository.Id == repositoryId)
+                ? state.GitHubConnections.SelectMany(connection => connection.Repositories.Select(repository => new { Connection = connection, Repository = repository, Project = project })).FirstOrDefault(x => x.Repository.Id == repositoryId)
                 : null;
         });
         if (target is null) return Back("Select a GitHub result destination for this project first.");
@@ -159,7 +193,7 @@ public sealed class ManageController(StateStore store, PasswordService passwords
         {
             var localFolder = await workspace.ResolveProjectPathAsync(job.ProjectId, job.ResultFolder);
             var resultName = Path.GetFileName(job.ResultFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-            var commitUrl = await gitHub.PushResultFolderAsync(target.Connection, target.Repository, localFolder, resultName, cancellationToken);
+            var commitUrl = await gitHub.PushResultFolderAsync(target.Connection, target.Repository, localFolder, StateStore.ProjectRepositoryFolder(target.Project), resultName, cancellationToken);
             await store.UpdateAsync(state => { var current = state.Jobs.First(x => x.Id == id); current.ResultsCommitUrl = commitUrl; current.ResultsPushError = ""; state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = MessageLevels.Info, Text = "GitHub result push completed." }); return true; });
             return Back("GitHub push completed.");
         }

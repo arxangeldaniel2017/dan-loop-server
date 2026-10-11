@@ -2,11 +2,4 @@
 @{ ViewData["Title"] = Model.Path; }
 @await Html.PartialAsync("_DashboardShell")
 <section class="section-title"><div><p class="eyebrow">TEXT PREVIEW & EDITOR</p><h2>@Model.Path</h2></div><a class="button secondary" asp-action="Index" asp-route-projectId="@Model.Project.Id" asp-route-path="@string.Join('/', Model.Path.Split('/').SkipLast(1))">← Files</a></section>
-@if (TempData["Message"] is string message) { <div class="notice">@message</div> }
-<form asp-action="SaveText" method="post" class="editor-form"><input type="hidden" name="projectId" value="@Model.Project.Id"/><input type="hidden" name="path" value="@Model.Path"/><textarea id="source-editor" name="content" spellcheck="false">@Model.Content</textarea><button>Save text</button></form>
-<h3>Formatted preview</h3><pre id="formatted-preview" class="syntax-preview" data-language="@Model.Language"></pre>
-<script>
-const editor=document.getElementById('source-editor'),preview=document.getElementById('formatted-preview');
-const esc=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
-function render(){let s=esc(editor.value),lang=preview.dataset.language;if(lang==='json'){try{s=esc(JSON.stringify(JSON.parse(editor.value),null,2))}catch{}s=s.replace(/(&quot;.*?&quot;)(\s*:)?/g,'<span class="syntax-key">$1</span>$2').replace(/\b(true|false|null|-?\d+(?:\.\d+)?)\b/g,'<span class="syntax-value">$1</span>')}else if(lang==='xml'){s=s.replace(/(&lt;\/?)([\w:-]+)/g,'$1<span class="syntax-key">$2</span>')}preview.innerHTML=s}editor.addEventListener('input',render);render();
-</script>
+@await Html.PartialAsync("_TextEditor", Model)

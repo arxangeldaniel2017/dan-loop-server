@@ -1,27 +1,56 @@
-using System.Diagnostics;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using DanLoopServer.Models;
 
 namespace DanLoopServer.Services;
 
-public sealed class AgentToolExecutor(WorkspaceService workspace)
+public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore store, GitHubService gitHub)
 {
-    private static readonly HashSet<string> AlwaysBlockedCommands = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "rm", "rmdir", "sudo", "su", "dd", "mkfs", "shutdown", "reboot", "kill", "killall"
-    };
     private static readonly HashSet<string> InternalFolders = new(StringComparer.OrdinalIgnoreCase) { ".git", ".history", ".trash", ".staging", ".undo" };
-    private static readonly HashSet<string> ReadOnlyGitCommands = new(StringComparer.OrdinalIgnoreCase) { "status", "diff", "log", "show", "branch", "rev-parse", "ls-files", "grep", "remote", "tag" };
 
-    public static object[] ToolDefinitions() =>
-    [
-        Tool("list_files", "List files and folders inside the project workspace.", new { type = "object", properties = new { path = new { type = "string" }, recursive = new { type = "boolean" } } }),
-        Tool("read_file", "Read a UTF-8 text file from the project workspace.", new { type = "object", properties = new { path = new { type = "string" } }, required = new[] { "path" } }),
-        Tool("write_file", "Create or replace a UTF-8 text file. Existing content is backed up.", new { type = "object", properties = new { path = new { type = "string" }, content = new { type = "string" } }, required = new[] { "path", "content" } }),
-        Tool("replace_in_file", "Replace exact text in an existing UTF-8 file. The old text must occur exactly once.", new { type = "object", properties = new { path = new { type = "string" }, old_text = new { type = "string" }, new_text = new { type = "string" } }, required = new[] { "path", "old_text", "new_text" } }),
-        Tool("run_command", "Run an approved development command in the project workspace. Prefer structured program and arguments.", new { type = "object", properties = new { program = new { type = "string" }, arguments = new { type = "array", items = new { type = "string" } }, command = new { type = "string" } } })
-    ];
+    public static object[] ToolDefinitions(AgentRuntimeSettings settings, IReadOnlySet<string>? allowedNames = null)
+    {
+        if (!settings.Enabled) return [];
+        bool Allowed(string name) => allowedNames is null || allowedNames.Contains(name);
+
+        var definitions = new List<object>();
+        if (Allowed("workspace_guide"))
+            definitions.Add(Tool("workspace_guide", "Show the permitted project workspace, file tools, top-level project entries, and connected GitHub destination. This never exposes the server filesystem.", new { type = "object", properties = new { } }));
+        if (settings.AllowFileRead)
+        {
+            if (Allowed("browse_folder")) definitions.Add(Tool("browse_folder", "Browse one folder inside the project workspace through a scoped file API, not a shell command. Paths are relative to the logical project root.", new { type = "object", properties = new { path = new { type = "string", description = "Project-relative folder path; empty means the project root." } } }));
+            if (Allowed("read_file")) definitions.Add(Tool("read_file", "Read any file belonging to this project. Text is returned directly; binary content is returned as Base64 in bounded chunks. Server and absolute paths are blocked.", new { type = "object", properties = new { path = new { type = "string" }, offset_bytes = new { type = "integer", minimum = 0, description = "Optional binary byte offset for reading the next chunk of a large file." } }, required = new[] { "path" } }));
+        }
+        if (settings.AllowFileWrite)
+        {
+            if (Allowed("write_file")) definitions.Add(Tool("write_file", "Create or replace one UTF-8 project file. Existing content is backed up inside the project workspace.", new { type = "object", properties = new { path = new { type = "string" }, content = new { type = "string" } }, required = new[] { "path", "content" } }));
+            if (Allowed("replace_in_file")) definitions.Add(Tool("replace_in_file", "Replace exact text in one existing project file. The old text must occur exactly once.", new { type = "object", properties = new { path = new { type = "string" }, old_text = new { type = "string" }, new_text = new { type = "string" } }, required = new[] { "path", "old_text", "new_text" } }));
+        }
+        if (settings.AllowGitHubPublish && Allowed("publish_project_files"))
+            definitions.Add(Tool("publish_project_files", "Commit selected project files to the project's assigned GitHub repository through the connected GitHub API. No terminal or local Git is used.", new { type = "object", properties = new { paths = new { type = "array", items = new { type = "string" } }, message = new { type = "string" } }, required = new[] { "paths", "message" } }));
+        return [.. definitions];
+    }
+
+    public async Task<string> CreateWorkspaceGuideAsync(Guid projectId, AgentRuntimeSettings settings)
+    {
+        var root = await workspace.ResolveProjectPathAsync(projectId, "");
+        var entries = Directory.EnumerateFileSystemEntries(root).Where(path => !InternalFolders.Contains(Path.GetFileName(path)) && !IsLink(path))
+            .OrderBy(path => Path.GetFileName(path), StringComparer.OrdinalIgnoreCase).Take(100)
+            .Select(path => Directory.Exists(path) ? Path.GetFileName(path) + "/" : Path.GetFileName(path));
+        var target = await ResolveGitHubTargetAsync(projectId);
+        var available = new List<string> { "workspace guide" };
+        if (settings.AllowFileRead) available.AddRange(["browse project folders", "read project text files"]);
+        if (settings.AllowFileWrite) available.AddRange(["write project files", "replace text in project files"]);
+        if (settings.AllowGitHubPublish) available.Add("queue AI-created files for background GitHub publishing; publish selected files immediately only when explicitly requested");
+        var project = await store.ReadAsync(state => state.Projects.First(item => item.Id == projectId));
+        return $"""
+               Project workspace: logical root `/` (project-relative paths only; this is not the server root).
+               Top-level project entries: {string.Join(", ", entries).NullIfEmpty() ?? "(empty)"}
+               Available operations: {string.Join(", ", available)}. The read tool returns text directly and binary files as Base64 chunks.
+               GitHub destination: {(target is null ? "not assigned" : target.Value.Repository.FullName)}.
+               GitHub project folder: {StateStore.ProjectRepositoryFolder(project)}. AI-created changes are batched and published there in the background; user-uploaded and user-edited files require explicit selection in the file manager.
+               Unavailable operations: shell, terminal, Bash, commands, builds, tests, programs, package managers, server file listing, local Git, local commits, local pushes, secrets, and paths outside this project.
+               """;
+    }
 
     public async Task<AgentToolResult> ExecuteAsync(Guid projectId, AgentToolCall call, AgentRuntimeSettings settings, CancellationToken cancellationToken)
     {
@@ -31,220 +60,196 @@ public sealed class AgentToolExecutor(WorkspaceService workspace)
             var arguments = document.RootElement;
             return call.Name.ToLowerInvariant() switch
             {
-                "list_files" when settings.AllowFileRead => await ListFilesAsync(projectId, arguments),
+                "workspace_guide" => new AgentToolResult { Success = true, Summary = "Project workspace guide", Output = await CreateWorkspaceGuideAsync(projectId, settings) },
+                "browse_folder" when settings.AllowFileRead => await BrowseFolderAsync(projectId, arguments),
                 "read_file" when settings.AllowFileRead => await ReadFileAsync(projectId, arguments, settings),
                 "write_file" when settings.AllowFileWrite => await WriteFileAsync(projectId, arguments),
                 "replace_in_file" when settings.AllowFileWrite => await ReplaceInFileAsync(projectId, arguments),
-                "run_command" or "bash" when settings.AllowCommands => await RunCommandAsync(projectId, arguments, settings, cancellationToken),
-                _ => new AgentToolResult { Success = false, Summary = call.Name, Output = "Tool is disabled or unknown." }
+                "publish_project_files" when settings.AllowGitHubPublish => await PublishProjectFilesAsync(projectId, arguments, cancellationToken),
+                "run_command" or "bash" => BlockedCommand(call.Name),
+                _ => new AgentToolResult { Success = false, Summary = call.Name, Output = "Tool is disabled or unknown. Use workspace_guide to see the project-scoped tools." }
             };
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            return new AgentToolResult { Success = false, Summary = call.Name, Output = ex.Message };
-        }
+        catch (Exception ex) { return new AgentToolResult { Success = false, Summary = call.Name, Output = ex.Message }; }
     }
 
-    private async Task<AgentToolResult> ListFilesAsync(Guid projectId, JsonElement arguments)
+    public async Task<bool> HasGitHubTargetAsync(Guid projectId) => await ResolveGitHubTargetAsync(projectId) is not null;
+
+    private static AgentToolResult BlockedCommand(string name) => new()
     {
-        var projectRoot = await workspace.ResolveProjectPathAsync(projectId, "");
-        var relative = NormalizeToolPath(projectRoot, Value(arguments, "path"));
-        var root = await workspace.ResolveProjectPathAsync(projectId, relative);
-        if (!Directory.Exists(root)) throw new DirectoryNotFoundException(relative);
-        var recursive = Bool(arguments, "recursive");
-        var option = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-        var items = Directory.EnumerateFileSystemEntries(root, "*", option)
-            .Where(path => !Path.GetRelativePath(root, path).Split(Path.DirectorySeparatorChar).Any(InternalFolders.Contains))
-            .Take(500)
-            .Select(path => Directory.Exists(path) ? Path.GetRelativePath(root, path).Replace('\\', '/') + "/" : Path.GetRelativePath(root, path).Replace('\\', '/'));
-        var output = string.Join('\n', items);
-        return new AgentToolResult { Success = true, Summary = $"Listed {relative.NullIfEmpty() ?? "workspace"}", Output = output.Length == 0 ? "(empty)" : output };
+        Success = false, Summary = $"Blocked {name}",
+        Output = "Server command execution is permanently unavailable. Do not use Bash, terminal commands, builds, tests, local Git, or server file-list commands. Use workspace_guide and project-scoped file tools instead."
+    };
+
+    private async Task<AgentToolResult> BrowseFolderAsync(Guid projectId, JsonElement arguments)
+    {
+        var relative = Value(arguments, "path");
+        EnsureSafePath(relative, allowEmpty: true);
+        var folder = await ResolveSafePathAsync(projectId, relative);
+        if (!Directory.Exists(folder)) throw new DirectoryNotFoundException($"Project folder '{relative}' was not found.");
+        var entries = new DirectoryInfo(folder).EnumerateFileSystemInfos().Where(entry => !InternalFolders.Contains(entry.Name) && !entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            .OrderByDescending(entry => entry is DirectoryInfo).ThenBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase).Take(500)
+            .Select(entry => entry is DirectoryInfo ? $"folder\t{entry.Name}/" : $"file\t{entry.Name}\t{((FileInfo)entry).Length} bytes");
+        var output = string.Join('\n', entries);
+        return new AgentToolResult { Success = true, Summary = $"Browsed project folder /{relative.Trim('/')}".TrimEnd('/'), Output = output.Length == 0 ? "(empty project folder)" : output };
     }
 
     private async Task<AgentToolResult> ReadFileAsync(Guid projectId, JsonElement arguments, AgentRuntimeSettings settings)
     {
-        var relative = Required(arguments, "path");
-        EnsureSafePath(relative);
-        var path = await workspace.ResolveProjectPathAsync(projectId, relative);
-        if (!File.Exists(path)) throw new FileNotFoundException("File not found.", relative);
-        if (!WorkspaceService.IsText(path)) throw new InvalidOperationException("Only recognized text files can be read.");
-        var content = await File.ReadAllTextAsync(path);
-        return new AgentToolResult { Success = true, Summary = $"Read {relative}", Output = Limit(content, settings.MaxToolOutputCharacters) };
+        var relative = Required(arguments, "path"); EnsureSafePath(relative);
+        var path = await ResolveSafePathAsync(projectId, relative);
+        if (!File.Exists(path)) throw new FileNotFoundException("Project file not found.", relative);
+        if (WorkspaceService.IsText(path))
+            return new AgentToolResult { Success = true, Summary = $"Read {relative}", Output = Limit(await File.ReadAllTextAsync(path), settings.MaxToolOutputCharacters) };
+
+        var info = new FileInfo(path);
+        var offset = arguments.TryGetProperty("offset_bytes", out var offsetValue) && offsetValue.TryGetInt64(out var requestedOffset) ? requestedOffset : 0;
+        if (offset < 0 || offset > info.Length) throw new InvalidOperationException("'offset_bytes' must be between 0 and the file size.");
+        var maximumBytes = Math.Max(1, (Math.Max(1000, settings.MaxToolOutputCharacters) - 500) / 4 * 3);
+        var byteCount = (int)Math.Min(info.Length - offset, maximumBytes);
+        var bytes = new byte[byteCount];
+        await using (var stream = File.OpenRead(path))
+        {
+            stream.Position = offset;
+            if (byteCount > 0) await stream.ReadExactlyAsync(bytes);
+        }
+        var nextOffset = offset + byteCount;
+        var continuation = nextOffset < info.Length ? $"Read the next chunk with offset_bytes={nextOffset}." : "This is the complete file.";
+        var output = $"""
+                     Binary project file: {relative}
+                     File size: {info.Length} bytes
+                     Bytes returned: {offset}-{nextOffset} ({byteCount} bytes)
+                     Encoding: Base64
+                     {continuation}
+
+                     {Convert.ToBase64String(bytes)}
+                     """;
+        return new AgentToolResult { Success = true, Summary = $"Read binary file {relative}", Output = output };
     }
 
     private async Task<AgentToolResult> WriteFileAsync(Guid projectId, JsonElement arguments)
     {
-        var relative = Required(arguments, "path");
-        var content = Required(arguments, "content", allowEmpty: true);
-        EnsureSafePath(relative);
-        var path = await workspace.ResolveProjectPathAsync(projectId, relative);
+        var relative = Required(arguments, "path"); var content = Required(arguments, "content", allowEmpty: true); EnsureSafePath(relative);
+        var path = await ResolveSafePathAsync(projectId, relative);
+        if (File.Exists(path) && await File.ReadAllTextAsync(path) == content)
+            return new AgentToolResult { Success = true, Mutated = false, Summary = $"No change to {relative}", Output = "The requested content already matches the project file." };
         await BackupAsync(projectId, relative, path);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await File.WriteAllTextAsync(path, content);
-        return new AgentToolResult { Success = true, Summary = $"Wrote {relative}", Output = $"Saved {content.Length} characters." };
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!); await File.WriteAllTextAsync(path, content);
+        await workspace.QueueAiGeneratedAsync(projectId, [relative]);
+        return new AgentToolResult { Success = true, Mutated = true, Summary = $"Wrote {relative}", Output = $"Saved {content.Length} characters to the project file." };
     }
 
     private async Task<AgentToolResult> ReplaceInFileAsync(Guid projectId, JsonElement arguments)
     {
-        var relative = Required(arguments, "path");
-        var oldText = Required(arguments, "old_text");
-        var newText = Required(arguments, "new_text", allowEmpty: true);
-        EnsureSafePath(relative);
-        var path = await workspace.ResolveProjectPathAsync(projectId, relative);
-        if (!File.Exists(path)) throw new FileNotFoundException("File not found.", relative);
-        var content = await File.ReadAllTextAsync(path);
-        var first = content.IndexOf(oldText, StringComparison.Ordinal);
+        var relative = Required(arguments, "path"); var oldText = Required(arguments, "old_text"); var newText = Required(arguments, "new_text", allowEmpty: true); EnsureSafePath(relative);
+        var path = await ResolveSafePathAsync(projectId, relative);
+        if (!File.Exists(path)) throw new FileNotFoundException("Project file not found.", relative);
+        var content = await File.ReadAllTextAsync(path); var first = content.IndexOf(oldText, StringComparison.Ordinal);
         if (first < 0) throw new InvalidOperationException("The requested old text was not found.");
         if (content.IndexOf(oldText, first + oldText.Length, StringComparison.Ordinal) >= 0) throw new InvalidOperationException("The old text occurs more than once; provide a more specific match.");
-        await BackupAsync(projectId, relative, path);
-        await File.WriteAllTextAsync(path, content[..first] + newText + content[(first + oldText.Length)..]);
-        return new AgentToolResult { Success = true, Summary = $"Updated {relative}", Output = "Exact replacement applied." };
+        if (oldText == newText)
+            return new AgentToolResult { Success = true, Mutated = false, Summary = $"No change to {relative}", Output = "The replacement text is identical to the existing text." };
+        await BackupAsync(projectId, relative, path); await File.WriteAllTextAsync(path, content[..first] + newText + content[(first + oldText.Length)..]);
+        await workspace.QueueAiGeneratedAsync(projectId, [relative]);
+        return new AgentToolResult { Success = true, Mutated = true, Summary = $"Updated {relative}", Output = "Exact replacement applied to the project file." };
     }
 
-    private async Task<AgentToolResult> RunCommandAsync(Guid projectId, JsonElement arguments, AgentRuntimeSettings settings, CancellationToken cancellationToken)
+    private async Task<AgentToolResult> PublishProjectFilesAsync(Guid projectId, JsonElement arguments, CancellationToken cancellationToken)
     {
-        var projectRoot = await workspace.ResolveProjectPathAsync(projectId, "");
-        var program = Value(arguments, "program");
-        var command = Value(arguments, "command");
-        var argumentList = arguments.TryGetProperty("arguments", out var array) && array.ValueKind == JsonValueKind.Array
-            ? array.EnumerateArray().Select(item => item.GetString() ?? "").ToList() : [];
-        ProcessStartInfo start;
-        string summary;
-        if (!string.IsNullOrWhiteSpace(program))
-        {
-            ValidateProgram(program, argumentList, settings);
-            ValidateArguments(argumentList);
-            if (Path.GetFileName(program).Equals("git", StringComparison.OrdinalIgnoreCase) && !IsGitInit(argumentList)) EnsureOwnedGitWorkspace(projectRoot);
-            start = new ProcessStartInfo(program) { WorkingDirectory = projectRoot };
-            foreach (var argument in argumentList) start.ArgumentList.Add(argument);
-            summary = $"{program} {string.Join(' ', argumentList)}".Trim();
-        }
-        else
-        {
-            if (string.IsNullOrWhiteSpace(command)) throw new InvalidOperationException("Provide program/arguments or command.");
-            ValidateShellCommand(command, settings);
-            if (ShellRequiresOwnedGit(command)) EnsureOwnedGitWorkspace(projectRoot);
-            start = new ProcessStartInfo("/bin/zsh") { WorkingDirectory = projectRoot };
-            start.ArgumentList.Add("-lc");
-            start.ArgumentList.Add(command);
-            summary = command;
-        }
-        start.RedirectStandardOutput = true;
-        start.RedirectStandardError = true;
-        start.UseShellExecute = false;
-        start.Environment.Remove("GITHUB_TOKEN");
-        start.Environment.Remove("GH_TOKEN");
-        start.Environment.Remove("OPENAI_API_KEY");
-        start.Environment.Remove("RUNPOD_API_KEY");
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start command.");
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.CommandTimeoutSeconds, 5, 600)));
-        try
-        {
-            var stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            var stderr = process.StandardError.ReadToEndAsync(timeout.Token);
-            await process.WaitForExitAsync(timeout.Token);
-            var output = (await stdout) + (await stderr);
-            return new AgentToolResult { Success = process.ExitCode == 0, Summary = summary, Output = Limit($"Exit code: {process.ExitCode}\n{output}", settings.MaxToolOutputCharacters) };
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(true); } catch { }
-            throw new TimeoutException($"Command exceeded {settings.CommandTimeoutSeconds} seconds.");
-        }
+        var message = Required(arguments, "message");
+        if (!arguments.TryGetProperty("paths", out var values) || values.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("'paths' must be a non-empty list of project-relative file paths.");
+        var paths = values.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String).Select(value => value.GetString() ?? "")
+            .Where(value => value.Length > 0).Distinct(StringComparer.Ordinal).Take(100).ToList();
+        if (paths.Count == 0) throw new InvalidOperationException("Choose at least one project file to publish.");
+        foreach (var path in paths) EnsureSafePath(path);
+        var url = await PublishPathsAsync(projectId, paths, message, cancellationToken);
+        return new AgentToolResult { Success = true, Summary = $"Published {paths.Count} project file(s)", Output = url };
     }
 
-    private static void ValidateShellCommand(string command, AgentRuntimeSettings settings)
+    public async Task<string> PublishPathsAsync(Guid projectId, IReadOnlyList<string> paths, string message, CancellationToken cancellationToken)
     {
-        if (command.IndexOfAny(['\n', '\r', '`', '>', '<', '$']) >= 0 || command.Contains("$(", StringComparison.Ordinal) || command.Contains("${", StringComparison.Ordinal))
-            throw new InvalidOperationException("Shell substitutions, redirections, and multiline commands are blocked.");
-        foreach (var segment in Regex.Split(command, @"\s*(?:&&|\|\||;|\|)\s*"))
+        if (paths.Count == 0) throw new InvalidOperationException("Choose at least one project file to publish.");
+        var target = await ResolveGitHubTargetAsync(projectId) ?? throw new InvalidOperationException("GitHub publishing is unavailable: assign a connected GitHub repository to this project first.");
+        var project = await store.ReadAsync(state => state.Projects.First(item => item.Id == projectId));
+        var root = await workspace.ResolveProjectPathAsync(projectId, "");
+        foreach (var path in paths) { EnsureSafePath(path); await ResolveSafePathAsync(projectId, path); }
+        var folder = StateStore.ProjectRepositoryFolder(project);
+        var url = await gitHub.PushProjectFilesAsync(target.Connection, target.Repository, root, paths, folder, message, cancellationToken);
+        await store.UpdateAsync(state =>
         {
-            var tokens = segment.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(token => token.Trim('\'', '\"')).ToList();
-            if (tokens.Count == 0) continue;
-            ValidateProgram(tokens[0], tokens.Skip(1).ToList(), settings);
-            ValidateArguments(tokens.Skip(1).ToList());
-        }
-    }
-
-    private static void ValidateProgram(string program, IReadOnlyList<string> arguments, AgentRuntimeSettings settings)
-    {
-        program = Path.GetFileName(program);
-        if (AlwaysBlockedCommands.Contains(program)) throw new InvalidOperationException($"Command '{program}' is always blocked for safety.");
-        if (!settings.AllowedCommands.Contains(program, StringComparer.OrdinalIgnoreCase)) throw new InvalidOperationException($"Command '{program}' is not allowed.");
-        if (program.Equals("git", StringComparison.OrdinalIgnoreCase))
-        {
-            var subcommand = arguments.FirstOrDefault(arg => !arg.StartsWith('-')) ?? "";
-            var allowed = subcommand == "init" || ReadOnlyGitCommands.Contains(subcommand) || settings.AllowGitCommit && subcommand is "add" or "commit" || settings.AllowGitPush && subcommand == "push";
-            if (!allowed) throw new InvalidOperationException($"Git '{subcommand}' is not permitted.");
-            if (subcommand == "push" && arguments.Any(arg => arg.Contains("force", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("Force push is always blocked.");
-        }
-        if (program.Equals("dotnet", StringComparison.OrdinalIgnoreCase) && arguments.FirstOrDefault() is not ("build" or "test" or "restore" or "format"))
-            throw new InvalidOperationException("Only dotnet build, test, restore, and format are allowed.");
-        if (program.Equals("find", StringComparison.OrdinalIgnoreCase) && arguments.Any(argument => argument is "-delete" or "-exec" or "-execdir" or "-ok" or "-okdir"))
-            throw new InvalidOperationException("Find actions that delete files or execute other programs are blocked.");
-    }
-
-    private static bool ShellRequiresOwnedGit(string command) => Regex.Split(command, @"\s*(?:&&|\|\||;|\|)\s*")
-        .Select(segment => segment.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(token => token.Trim('\'', '\"')).ToList())
-        .Any(tokens => tokens.FirstOrDefault()?.Equals("git", StringComparison.OrdinalIgnoreCase) == true && !IsGitInit(tokens.Skip(1).ToList()));
-
-    private static bool IsGitInit(IReadOnlyList<string> arguments) => arguments.FirstOrDefault(arg => !arg.StartsWith('-')) == "init";
-
-    private static void ValidateArguments(IReadOnlyList<string> arguments)
-    {
-        foreach (var argument in arguments)
-        {
-            var candidate = argument.Contains('=') ? argument[(argument.IndexOf('=') + 1)..] : argument;
-            if (string.IsNullOrWhiteSpace(candidate) || candidate is "." or "./") continue;
-            if (Uri.TryCreate(candidate, UriKind.Absolute, out var uri))
+            var current = state.Projects.First(item => item.Id == projectId);
+            current.RepositoryFolder = folder;
+            current.AutoPublishPendingPaths.RemoveAll(path => paths.Contains(path, StringComparer.OrdinalIgnoreCase));
+            if (current.AutoPublishPendingPaths.Count == 0) current.AutoPublishQueuedAt = null;
+            current.LastAutoPublishAt = DateTimeOffset.UtcNow;
+            current.NextAutoPublishAttemptAt = null;
+            current.LastAutoPublishCommitUrl = url;
+            current.LastAutoPublishError = "";
+            foreach (var job in state.Jobs.Where(job => job.ProjectId == projectId && job.ProjectFilesChanged.Count > 0))
             {
-                if (uri.Scheme is "http" or "https") continue;
-                throw new InvalidOperationException($"URI scheme '{uri.Scheme}' is not allowed.");
+                var published = job.PublishedProjectFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (var path in paths.Where(path => job.ProjectFilesChanged.Contains(path, StringComparer.OrdinalIgnoreCase))) published.Add(path);
+                job.PublishedProjectFiles = published.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToList();
+                if (job.ProjectFilesChanged.All(path => published.Contains(path) || current.UserManagedPaths.Contains(path, StringComparer.OrdinalIgnoreCase)))
+                    job.ProjectCommitUrl = url;
             }
-            if (Path.IsPathRooted(candidate) || candidate.StartsWith('~') || candidate.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries).Contains(".."))
-                throw new InvalidOperationException($"Argument '{argument}' points outside the project workspace.");
-        }
+            return true;
+        });
+        return url;
     }
 
-    private static string NormalizeToolPath(string projectRoot, string requested)
+    private Task<(GitHubConnection Connection, GitHubRepository Repository)?> ResolveGitHubTargetAsync(Guid projectId) => store.ReadAsync<(GitHubConnection Connection, GitHubRepository Repository)?>(state =>
     {
-        if (string.IsNullOrWhiteSpace(requested) || requested is "." or "./") return "";
-        if (!Path.IsPathRooted(requested)) return requested;
-        var full = Path.GetFullPath(requested);
-        var root = Path.GetFullPath(projectRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (!full.StartsWith(root, StringComparison.Ordinal) && !full.Equals(root.TrimEnd(Path.DirectorySeparatorChar), StringComparison.Ordinal))
-            throw new InvalidOperationException("The requested absolute path is outside this project workspace. Use a workspace-relative path such as '.' or 'src'.");
-        return Path.GetRelativePath(projectRoot, full).Replace('\\', '/');
-    }
-
-    private static void EnsureOwnedGitWorkspace(string projectRoot)
-    {
-        var marker = Path.Combine(projectRoot, ".git");
-        if (!Directory.Exists(marker) && !File.Exists(marker))
-            throw new InvalidOperationException("Git is not initialized in this project workspace. Parent repositories are never used. Initialize or import a repository into the workspace first.");
-    }
+        var project = state.Projects.FirstOrDefault(item => item.Id == projectId);
+        var link = project?.ResultsRepositoryId is long repositoryId
+            ? state.ProjectRepositories.FirstOrDefault(item => item.ProjectId == projectId && item.RepositoryId == repositoryId)
+            : state.ProjectRepositories.FirstOrDefault(item => item.ProjectId == projectId);
+        if (link is null) return ((GitHubConnection Connection, GitHubRepository Repository)?)null;
+        var connection = state.GitHubConnections.FirstOrDefault(item => item.Id == link.GitHubConnectionId);
+        var repository = connection?.Repositories.FirstOrDefault(item => item.Id == link.RepositoryId);
+        return connection is null || repository is null ? null : (connection, repository);
+    });
 
     private async Task BackupAsync(Guid projectId, string relative, string path)
     {
         if (!File.Exists(path)) return;
         var root = await workspace.ResolveProjectPathAsync(projectId, "");
         var backup = Path.Combine(root, ".history", DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmssfff"), relative.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
-        File.Copy(path, backup);
+        Directory.CreateDirectory(Path.GetDirectoryName(backup)!); File.Copy(path, backup);
     }
 
-    private static void EnsureSafePath(string relative)
+    private async Task<string> ResolveSafePathAsync(Guid projectId, string relative)
     {
+        var root = await workspace.ResolveProjectPathAsync(projectId, "");
+        var resolved = await workspace.ResolveProjectPathAsync(projectId, relative);
+        var current = root;
+        foreach (var segment in relative.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            if (!File.Exists(current) && !Directory.Exists(current)) break;
+            if (IsLink(current)) throw new InvalidOperationException("Symbolic links are not accessible to AI tools because they may leave the project workspace.");
+        }
+        return resolved;
+    }
+
+    private static bool IsLink(string path)
+    {
+        try { return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint); }
+        catch { return false; }
+    }
+
+    private static void EnsureSafePath(string relative, bool allowEmpty = false)
+    {
+        if (string.IsNullOrWhiteSpace(relative)) { if (allowEmpty) return; throw new InvalidOperationException("A project-relative path is required."); }
+        if (Path.IsPathRooted(relative) || relative.StartsWith('~')) throw new InvalidOperationException("Absolute and server paths are blocked. Use a project-relative path.");
         var parts = relative.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Any(InternalFolders.Contains)) throw new InvalidOperationException("Internal workspace folders cannot be accessed by tools.");
+        if (parts.Any(part => part == ".." || InternalFolders.Contains(part))) throw new InvalidOperationException("The path is outside the permitted project files.");
     }
 
     private static object Tool(string name, string description, object parameters) => new { type = "function", function = new { name, description, parameters } };
     private static string Required(JsonElement element, string name, bool allowEmpty = false) { var value = Value(element, name); if (!allowEmpty && string.IsNullOrEmpty(value)) throw new InvalidOperationException($"'{name}' is required."); return value; }
     private static string Value(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
-    private static bool Bool(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind is JsonValueKind.True;
     private static string Limit(string value, int maximum) => value.Length <= maximum ? value : value[..maximum] + $"\n… truncated after {maximum} characters";
 }
 

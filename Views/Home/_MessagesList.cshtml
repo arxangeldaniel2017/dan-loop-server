@@ -1,0 +1,22 @@
+@model DashboardViewModel
+@{
+    var visibleProjectIds = Model.VisibleProjects.Select(project => project.Id).ToHashSet();
+    var take = ViewBag.Take is int requestedTake ? requestedTake : 10;
+    var allMessages = Model.State.Messages
+        .Where(message => message.ProjectId is null || visibleProjectIds.Contains(message.ProjectId.Value))
+        .OrderByDescending(message => message.CreatedAt)
+        .Take(300)
+        .ToList();
+    var visibleMessages = allMessages.Take(take).ToList();
+    var version = string.Join('|', allMessages.Select(message => $"{message.Id:N}:{message.Level}:{message.CreatedAt.ToUnixTimeMilliseconds()}"));
+}
+<div data-live-version="@version" data-visible-count="@visibleMessages.Count" data-has-more="@(allMessages.Count > visibleMessages.Count ? "true" : "false")">
+    @if (!visibleMessages.Any()) { <div class="empty">No messages.</div> }
+    <div class="message-list incremental-list-scroll" data-live-scroll>
+        @foreach (var item in visibleMessages)
+        {
+            var project = Model.State.Projects.FirstOrDefault(project => project.Id == item.ProjectId);
+            <details class="message-item @item.Level.ToLowerInvariant()" data-live-key="message-@item.Id"><summary><span class="message-level">@item.Level</span><strong>@(project?.Name ?? "System")</strong><span class="message-preview">@item.Text</span><time>@item.CreatedAt.ToLocalTime().ToString("g")</time></summary><div class="message-body">@item.Text</div></details>
+        }
+    </div>
+</div>

@@ -28,17 +28,24 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
     options.KnownProxies.Clear();
 });
 builder.Services.AddSingleton<StateStore>();
+builder.Services.AddSingleton<S3ObjectStorage>();
+builder.Services.AddSingleton<AiConnectionCatalogService>();
 builder.Services.AddSingleton<PasswordService>();
 builder.Services.AddSingleton<WorkspaceService>();
+builder.Services.AddSingleton<ProjectPlanService>();
 builder.Services.AddSingleton<AgentToolExecutor>();
 builder.Services.AddHttpClient<RemoteModelClient>(client => client.Timeout = TimeSpan.FromMinutes(5));
 builder.Services.AddHttpClient<AgentRuntimeClient>(client => client.Timeout = TimeSpan.FromMinutes(15));
 builder.Services.AddSingleton<AgentRuntimeService>();
 builder.Services.AddHttpClient<GitHubService>(client => client.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddHostedService<JobWorker>();
+builder.Services.AddHostedService<GitHubSyncWorker>();
+builder.Services.AddHostedService<S3SyncWorker>();
 
 var app = builder.Build();
 await app.Services.GetRequiredService<StateStore>().InitializeAsync();
+await app.Services.GetRequiredService<AiConnectionCatalogService>().InitializeAsync();
+await app.Services.GetRequiredService<S3ObjectStorage>().InitializeAsync();
 app.UseForwardedHeaders();
 
 if (!app.Environment.IsDevelopment())

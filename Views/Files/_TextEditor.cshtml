@@ -1,0 +1,16 @@
+@model TextEditorViewModel
+@{ var parent = string.Join('/', Model.Path.Split('/').SkipLast(1)); }
+<section class="file-preview-panel" data-text-editor data-language="@Model.Language" data-parent-path="@parent">
+    <header class="preview-toolbar"><button type="button" class="secondary" data-file-back data-path="@parent">← Back to files</button><div><strong>@System.IO.Path.GetFileName(Model.Path)</strong><small>@Model.Language editor · @Model.Path</small></div><span class="editor-state" data-editor-state>Ready</span></header>
+    <form asp-action="SaveText" method="post" class="smart-editor-form" data-editor-form><input type="hidden" name="projectId" value="@Model.Project.Id"/><input type="hidden" name="path" value="@Model.Path"/>
+        <div class="editor-topbar">
+            <span class="editor-position" data-editor-position>Line 1, column 1</span>
+            <div class="editor-top-actions" aria-label="Document display and save options">
+                <label class="editor-switch"><input type="checkbox" data-editor-code checked/><span>Code</span></label>
+                <label class="editor-switch"><input type="checkbox" data-editor-dark/><span>Dark</span></label>
+                <button type="submit" data-editor-save>Save</button>
+            </div>
+        </div>
+        <div class="smart-editor-surface"><pre class="syntax-preview" data-syntax-preview data-language="@Model.Language" aria-hidden="true"></pre><div class="editor-input-wrap" data-plain-editor><textarea name="content" spellcheck="false" autocomplete="off" autocapitalize="off" data-source-editor aria-label="Edit @System.IO.Path.GetFileName(Model.Path)">@Model.Content</textarea><div class="completion-strip" data-completion-strip aria-label="Code suggestions"></div></div></div>
+    </form>
+</section>

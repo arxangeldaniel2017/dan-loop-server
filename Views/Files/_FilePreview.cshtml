@@ -1,0 +1,8 @@
+@model FilePreviewViewModel
+<section class="file-preview-panel" data-binary-preview data-parent-path="@Model.ParentPath">
+    <header class="preview-toolbar"><button type="button" class="secondary" data-file-back data-path="@Model.ParentPath">← Back to files</button><div><strong>@System.IO.Path.GetFileName(Model.Path)</strong><small>@Model.ContentType · @Model.Path</small></div></header>
+    @if (Model.ContentType.StartsWith("video/")) { <video class="embedded-file-preview" controls src="@Url.Action("Preview", "Files", new { projectId = Model.Project.Id, path = Model.Path })"></video> }
+    else if (Model.ContentType.StartsWith("audio/")) { <audio class="embedded-audio-preview" controls src="@Url.Action("Preview", "Files", new { projectId = Model.Project.Id, path = Model.Path })"></audio> }
+    else { <iframe class="embedded-file-preview" title="Preview @System.IO.Path.GetFileName(Model.Path)" src="@Url.Action("Preview", "Files", new { projectId = Model.Project.Id, path = Model.Path })"></iframe> }
+    <a class="button secondary" href="@Url.Action("Preview", "Files", new { projectId = Model.Project.Id, path = Model.Path })" download>Download file</a>
+</section>

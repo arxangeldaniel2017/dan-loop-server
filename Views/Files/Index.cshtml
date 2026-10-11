@@ -1,9 +1,7 @@
 @model FileManagerViewModel
 @{ ViewData["Title"] = $"Files · {Model.Project.Name}"; }
 @await Html.PartialAsync("_DashboardShell")
-<section class="section-title file-manager-title"><div><p class="eyebrow">PROJECT WORKSPACE</p><h2>@Model.Project.Name</h2><p class="muted" data-workspace-path>/@Model.Path</p></div></section>
-@if (TempData["Message"] is string notice) { <div class="notice">@notice</div> }
-<div id="file-browser-host" data-file-browser-url="@Url.Action("BrowsePartial", "Files")" data-project-id="@Model.Project.Id">@await Html.PartialAsync("_FileBrowser", Model)</div>
+<div class="standalone-file-workspace">@await Html.PartialAsync("_InlineWorkspace", Model)</div>
 <section class="conversation-list"><div class="section-title"><div><p class="eyebrow">SAVED CONTEXT</p><h2>Conversations</h2></div></div>
     @if (!Model.Conversations.Any()) { <div class="empty">No agent conversations yet.</div> }
     @foreach (var conversation in Model.Conversations) { <article class="conversation-card"><strong>@conversation.Title</strong><small>@conversation.Messages.Count messages · @conversation.UpdatedAt.ToLocalTime().ToString("g")</small>@foreach (var message in conversation.Messages) { <details><summary>@message.Role · @message.CreatedAt.ToLocalTime().ToString("g")</summary><pre>@message.Content</pre>@if (message.FilePaths.Any()) { <p>@string.Join(", ", message.FilePaths)</p> }</details> }</article> }

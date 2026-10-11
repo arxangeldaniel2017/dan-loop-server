@@ -115,6 +115,93 @@ async function refreshJobs() {
 document.querySelector('.tab[data-tab="jobs"]')?.addEventListener('click', refreshJobs);
 if (jobsHost) { updateJobsPage(); updateSmartTimes(); setInterval(refreshJobs, 3000); setInterval(updateSmartTimes, 10000); }
 
+const liveHistoryLists = new Map();
+document.querySelectorAll('[data-live-list]').forEach(host => {
+  const state = { host, loading: false };
+  liveHistoryLists.set(host.id, state);
+  const bindScroll = () => {
+    const scroll = host.querySelector('[data-live-scroll]');
+    if (!scroll || scroll.dataset.bound === 'true') return;
+    scroll.dataset.bound = 'true';
+    scroll.addEventListener('scroll', () => {
+      const region = host.querySelector('[data-live-version]');
+      if (region?.dataset.hasMore === 'true' && scroll.scrollTop + scroll.clientHeight >= scroll.scrollHeight - 70)
+        refreshLiveHistory(state, Number(region.dataset.visibleCount || 10) + 10, true);
+    });
+  };
+  state.bindScroll = bindScroll;
+  bindScroll();
+});
+
+async function refreshLiveHistory(state, requestedTake, force = false) {
+  if (!state || state.loading || document.hidden) return;
+  state.loading = true;
+  const host = state.host;
+  const currentRegion = host.querySelector('[data-live-version]');
+  const take = Math.max(10, requestedTake || Number(currentRegion?.dataset.visibleCount || 10));
+  try {
+    const url = new URL(host.dataset.liveUrl, location.origin); url.searchParams.set('take', String(take));
+    const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok || response.redirected) return;
+    const html = await response.text();
+    const next = document.createElement('div'); next.innerHTML = html;
+    const nextRegion = next.querySelector('[data-live-version]');
+    if (!force && currentRegion?.dataset.liveVersion === nextRegion?.dataset.liveVersion && Number(currentRegion?.dataset.visibleCount) === Number(nextRegion?.dataset.visibleCount)) return;
+    const openKeys = new Set([...host.querySelectorAll('details[open][data-live-key]')].map(item => item.dataset.liveKey));
+    const previousScroll = host.querySelector('[data-live-scroll]')?.scrollTop || 0;
+    host.innerHTML = html;
+    host.querySelectorAll('details[data-live-key]').forEach(item => { item.open = openKeys.has(item.dataset.liveKey); });
+    const nextScroll = host.querySelector('[data-live-scroll]');
+    if (nextScroll) nextScroll.scrollTop = previousScroll;
+    state.bindScroll();
+  } catch {
+    // Keep the retained history visible and retry on the next refresh.
+  } finally { state.loading = false; }
+}
+
+const refreshAllLiveHistory = () => liveHistoryLists.forEach(state => refreshLiveHistory(state));
+document.querySelector('.tab[data-tab="chats"]')?.addEventListener('click', refreshAllLiveHistory);
+if (liveHistoryLists.size) setInterval(refreshAllLiveHistory, 3000);
+
+document.addEventListener('submit', async event => {
+  const form = event.target.closest('[data-live-clear]');
+  if (!form) return;
+  event.preventDefault();
+  if (form.dataset.confirm && !confirm(form.dataset.confirm)) return;
+  const button = form.querySelector('button[type="submit"], button:not([type])');
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch(form.action, { method: 'POST', body: new FormData(form), credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    if (!response.ok) throw new Error('Could not clear this history.');
+    const state = liveHistoryLists.get(form.dataset.clearTarget);
+    if (state) await refreshLiveHistory(state, 10, true);
+  } catch (error) { console.warn(error); }
+  finally { if (button) button.disabled = false; }
+});
+
+const planStepsHost = document.getElementById('plan-steps-list');
+let planStepsRefreshing = false;
+async function refreshPlanSteps() {
+  if (!planStepsHost || planStepsRefreshing || document.hidden) return;
+  planStepsRefreshing = true;
+  try {
+    const response = await fetch(planStepsHost.dataset.planStepsUrl, { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok || response.redirected) return;
+    const html = await response.text();
+    const next = document.createElement('div'); next.innerHTML = html;
+    const currentVersion = planStepsHost.querySelector('[data-plan-steps-version]')?.dataset.planStepsVersion;
+    const nextVersion = next.querySelector('[data-plan-steps-version]')?.dataset.planStepsVersion;
+    if (currentVersion === nextVersion) return;
+    const openSteps = new Set([...planStepsHost.querySelectorAll('details[open]')].map(item => item.querySelector('input[name="stepId"]')?.value).filter(Boolean));
+    planStepsHost.innerHTML = html;
+    planStepsHost.querySelectorAll('details').forEach(item => { const id = item.querySelector('input[name="stepId"]')?.value; if (id && openSteps.has(id)) item.open = true; });
+  } catch {
+    // Keep the durable step log visible while the server is temporarily unavailable.
+  } finally { planStepsRefreshing = false; }
+}
+document.querySelector('.tab[data-tab="steps"]')?.addEventListener('click', refreshPlanSteps);
+if (planStepsHost) setInterval(refreshPlanSteps, 3000);
+
 const toolAuditHost = document.getElementById('tool-audit-list');
 if (toolAuditHost) {
   let toolAuditRefreshing = false;
@@ -137,19 +224,23 @@ if (toolAuditHost) {
 }
 
 function initializeFileManager(fileManager) {
+  if (!fileManager || fileManager.dataset.initialized === 'true') return;
+  fileManager.dataset.initialized = 'true';
   const browser = fileManager.querySelector('[data-file-browser]');
   const items = [...fileManager.querySelectorAll('[data-file-item]')];
   const checkboxes = [...fileManager.querySelectorAll('[data-file-checkbox]')];
   const search = fileManager.querySelector('[data-file-search]');
   const viewToggle = fileManager.querySelector('[data-file-view-toggle]');
-  const deleteButton = fileManager.querySelector('[data-delete-selected]');
-  const selectedCount = fileManager.querySelector('[data-selected-count]');
+  const selectionActions = [...fileManager.querySelectorAll('[data-selection-action]')];
+  const selectedCounts = [...fileManager.querySelectorAll('[data-selected-count]')];
   const emptySearch = fileManager.querySelector('[data-search-empty]');
+  const moveForm = fileManager.querySelector('[data-move-files-form]');
+  let draggedPaths = [], dragGhost = null, draggedAt = 0;
 
   const updateSelection = () => {
     const count = checkboxes.filter(checkbox => checkbox.checked).length;
-    selectedCount.textContent = count;
-    deleteButton.disabled = count === 0;
+    selectedCounts.forEach(label => { label.textContent = count; });
+    selectionActions.forEach(button => { button.disabled = count === 0; });
     items.forEach(item => item.classList.toggle('selected', item.querySelector('[data-file-checkbox]').checked));
   };
   const setView = view => {
@@ -168,6 +259,63 @@ function initializeFileManager(fileManager) {
     });
     emptySearch.hidden = visible > 0 || query.length === 0;
   };
+  const clearDropTargets = () => fileManager.querySelectorAll('.drag-over').forEach(target => target.classList.remove('drag-over'));
+  const pathForItem = item => item?.dataset.filePath || '';
+  const buildDragGhost = (item, count) => {
+    const ghost = document.createElement('div');
+    ghost.className = 'file-drag-ghost';
+    ghost.innerHTML = `<span>${item.dataset.fileDirectory === 'true' ? '📁' : '↗'}</span><strong>${item.querySelector('.explorer-main strong')?.textContent || 'Item'}</strong>${count > 1 ? `<b>+${count - 1}</b>` : ''}`;
+    document.body.appendChild(ghost); return ghost;
+  };
+  const finishDrag = () => {
+    clearDropTargets(); items.forEach(item => item.classList.remove('dragging'));
+    dragGhost?.remove(); dragGhost = null; draggedPaths = []; draggedAt = Date.now();
+  };
+
+  items.forEach(item => {
+    item.addEventListener('dragstart', event => {
+      const ownPath = pathForItem(item);
+      const ownCheckbox = item.querySelector('[data-file-checkbox]');
+      draggedPaths = ownCheckbox.checked ? checkboxes.filter(box => box.checked).map(box => box.value) : [ownPath];
+      if (!draggedPaths.length) { event.preventDefault(); return; }
+      items.filter(candidate => draggedPaths.includes(pathForItem(candidate))).forEach(candidate => candidate.classList.add('dragging'));
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('application/x-dan-loop-paths', JSON.stringify(draggedPaths));
+      event.dataTransfer.setData('text/plain', draggedPaths.join('\n'));
+      dragGhost = buildDragGhost(item, draggedPaths.length);
+      event.dataTransfer.setDragImage(dragGhost, 24, 24);
+    });
+    item.addEventListener('dragend', finishDrag);
+  });
+  fileManager.querySelectorAll('[data-drop-path]').forEach(target => {
+    target.addEventListener('dragenter', event => {
+      if (!draggedPaths.length || draggedPaths.includes(target.dataset.dropPath)) return;
+      event.preventDefault(); clearDropTargets(); target.classList.add('drag-over');
+    });
+    target.addEventListener('dragover', event => {
+      if (!draggedPaths.length || draggedPaths.includes(target.dataset.dropPath)) return;
+      event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+    });
+    target.addEventListener('dragleave', event => { if (!target.contains(event.relatedTarget)) target.classList.remove('drag-over'); });
+    target.addEventListener('drop', event => {
+      event.preventDefault(); event.stopPropagation();
+      const paths = draggedPaths.length ? [...draggedPaths] : JSON.parse(event.dataTransfer.getData('application/x-dan-loop-paths') || '[]');
+      const destination = target.dataset.dropPath || '';
+      if (!moveForm || !paths.length || paths.includes(destination)) { finishDrag(); return; }
+      moveForm.querySelectorAll('input[data-move-source]').forEach(input => input.remove());
+      paths.forEach(path => {
+        const input = document.createElement('input'); input.type = 'hidden'; input.name = 'sourcePaths'; input.value = path; input.dataset.moveSource = 'true'; moveForm.appendChild(input);
+      });
+      moveForm.querySelector('[data-move-destination]').value = destination;
+      items.filter(candidate => paths.includes(pathForItem(candidate))).forEach(candidate => candidate.classList.add('file-dropping'));
+      clearDropTargets(); target.classList.add('drop-received');
+      draggedAt = Date.now();
+      setTimeout(() => { finishDrag(); moveForm.requestSubmit(); }, 360);
+    });
+  });
+  fileManager.addEventListener('click', event => {
+    if (Date.now() - draggedAt < 500) { event.preventDefault(); event.stopPropagation(); }
+  }, true);
 
   fileManager.addEventListener('click', event => {
     const viewButton = event.target.closest('[data-file-view-toggle]');
@@ -179,41 +327,338 @@ function initializeFileManager(fileManager) {
     }
   });
   checkboxes.forEach(checkbox => checkbox.addEventListener('change', updateSelection));
-  search.addEventListener('input', filterFiles);
+  fileManager.querySelector('[data-download-selected-form]')?.addEventListener('submit', event => {
+    const form = event.currentTarget;
+    form.querySelectorAll('input[data-generated-selection]').forEach(input => input.remove());
+    checkboxes.filter(checkbox => checkbox.checked).forEach(checkbox => {
+      const input = document.createElement('input');
+      input.type = 'hidden'; input.name = 'selectedPaths'; input.value = checkbox.value; input.dataset.generatedSelection = 'true';
+      form.appendChild(input);
+    });
+  });
+  search?.addEventListener('input', filterFiles);
   setView(localStorage.getItem('dan-loop-file-view') === 'list' ? 'list' : 'grid');
   updateSelection();
 }
 
-const fileBrowserHost = document.getElementById('file-browser-host');
-if (fileBrowserHost) {
-  let fileNavigationRunning = false;
-  const loadFolder = async (url, addHistory = true) => {
-    if (fileNavigationRunning) return;
-    fileNavigationRunning = true;
-    const scrollPosition = window.scrollY;
-    try {
-      const destination = new URL(url, location.href);
-      const path = destination.searchParams.get('path') || '';
-      const partial = new URL(fileBrowserHost.dataset.fileBrowserUrl, location.origin);
-      partial.searchParams.set('projectId', fileBrowserHost.dataset.projectId);
-      if (path) partial.searchParams.set('path', path);
-      const response = await fetch(partial, { credentials: 'same-origin', cache: 'no-store' });
-      if (!response.ok || response.redirected) return;
-      fileBrowserHost.innerHTML = await response.text();
-      document.querySelector('[data-workspace-path]').textContent = `/${path}`;
-      initializeFileManager(fileBrowserHost.querySelector('[data-file-manager]'));
-      if (addHistory) history.pushState({ filePath: path }, '', destination);
-      window.scrollTo(0, scrollPosition);
-    } finally { fileNavigationRunning = false; }
+const preserveScroll = async operation => {
+  const x = window.scrollX, y = window.scrollY;
+  const previousAnchor = document.documentElement.style.overflowAnchor;
+  document.documentElement.style.overflowAnchor = 'none';
+  try { return await operation(); }
+  finally {
+    const restore = () => window.scrollTo(x, y);
+    restore(); requestAnimationFrame(restore); setTimeout(() => { restore(); document.documentElement.style.overflowAnchor = previousAnchor; }, 80);
+  }
+};
+
+const escapeCode = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+const languageKeywords = {
+  csharp: ['class','public','private','protected','internal','static','async','await','using','namespace','return','new','var','string','int','bool','null','true','false','if','else','foreach','while','try','catch'],
+  javascript: ['const','let','function','async','await','return','class','new','import','export','if','else','for','while','try','catch','true','false','null','undefined'],
+  typescript: ['const','let','function','interface','type','class','public','private','async','await','return','import','export','string','number','boolean','unknown','null'],
+  python: ['def','class','import','from','return','async','await','if','elif','else','for','while','try','except','with','True','False','None'],
+  json: ['true','false','null'], xml: [], html: ['div','section','article','header','footer','main','button','input','form','label','span'],
+  css: ['display','position','color','background','border','padding','margin','width','height','grid','flex','var'],
+  sql: ['SELECT','FROM','WHERE','JOIN','INSERT','UPDATE','DELETE','CREATE','TABLE','ORDER','GROUP','BY','AS','AND','OR','NULL']
+};
+
+function highlightedCode(value, language) {
+  const keywords = new Set(languageKeywords[language] || []);
+  const pattern = language === 'xml' || language === 'html'
+    ? /<!--[\s\S]*?-->|<[^>]+>|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b-?\d+(?:\.\d+)?\b|\b[A-Za-z_$][\w$-]*\b/g
+    : /\/\/[^\n]*|#[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b-?\d+(?:\.\d+)?\b|\b[A-Za-z_$][\w$-]*\b/g;
+  let output = '', last = 0;
+  for (const match of value.matchAll(pattern)) {
+    const token = match[0], offset = match.index;
+    output += escapeCode(value.slice(last, offset));
+    let className = '';
+    if (token.startsWith('//') || token.startsWith('#') || token.startsWith('<!--')) className = 'syntax-comment';
+    else if (token.startsWith('<')) className = 'syntax-key';
+    else if (/^["'`]/.test(token)) className = language === 'json' && /^\s*:/.test(value.slice(offset + token.length)) ? 'syntax-key' : 'syntax-string';
+    else if (/^(true|false|null|undefined|-?\d)/.test(token)) className = 'syntax-value';
+    else if (keywords.has(token)) className = 'syntax-keyword';
+    output += className ? `<span class="${className}">${escapeCode(token)}</span>` : escapeCode(token);
+    last = offset + token.length;
+  }
+  return output + escapeCode(value.slice(last));
+}
+
+function initializeTextEditor(panel) {
+  if (!panel || panel.dataset.initialized === 'true') return;
+  panel.dataset.initialized = 'true';
+  const form = panel.querySelector('[data-editor-form]');
+  const editor = panel.querySelector('[data-source-editor]');
+  const preview = panel.querySelector('[data-syntax-preview]');
+  const plainEditor = panel.querySelector('[data-plain-editor]');
+  const codeToggle = panel.querySelector('[data-editor-code]');
+  const darkToggle = panel.querySelector('[data-editor-dark]');
+  const state = panel.querySelector('[data-editor-state]');
+  const position = panel.querySelector('[data-editor-position]');
+  const suggestions = panel.querySelector('[data-completion-strip]');
+  const language = panel.dataset.language;
+  const projectId = form.querySelector('[name="projectId"]').value;
+  const path = form.querySelector('[name="path"]').value;
+  const draftKey = `dan-loop-editor-draft:${projectId}:${path}`;
+  const autosaveDelay = 4000;
+  let revision = 0, savedRevision = 0, saveRunning = false, saveAgain = false;
+  let highlightTimer, autosaveTimer;
+  const storedCode = localStorage.getItem('dan-loop-editor-code');
+  const storedDark = localStorage.getItem('dan-loop-editor-dark');
+  codeToggle.checked = storedCode === null ? true : storedCode === 'true';
+  darkToggle.checked = storedDark === 'true';
+  const applyDisplay = () => {
+    panel.classList.toggle('editor-code-mode', codeToggle.checked);
+    preview.hidden = !codeToggle.checked;
+    panel.classList.toggle('editor-dark', darkToggle.checked);
+    localStorage.setItem('dan-loop-editor-code', String(codeToggle.checked));
+    localStorage.setItem('dan-loop-editor-dark', String(darkToggle.checked));
   };
-  fileBrowserHost.addEventListener('click', event => {
+  const updatePositionAndSuggestions = () => {
+    const before = editor.value.slice(0, editor.selectionStart), lines = before.split('\n');
+    position.textContent = `Line ${lines.length}, column ${lines.at(-1).length + 1}`;
+    const prefix = before.match(/[A-Za-z_$][\w$-]*$/)?.[0] || '';
+    const documentWords = editor.value.match(/[A-Za-z_$][\w$-]{2,}/g) || [];
+    const candidates = [...new Set([...(languageKeywords[language] || []), ...documentWords])].filter(word => prefix && word !== prefix && word.toLowerCase().startsWith(prefix.toLowerCase())).slice(0, 7);
+    suggestions.innerHTML = candidates.map(word => `<button type="button" data-completion="${word.replaceAll('"','&quot;')}">${word}</button>`).join('');
+  };
+  const updateHighlight = () => {
+    preview.innerHTML = highlightedCode(editor.value + (editor.value.endsWith('\n') ? ' ' : ''), language);
+    preview.scrollTop = editor.scrollTop; preview.scrollLeft = editor.scrollLeft;
+  };
+  const rememberDraft = () => {
+    try { localStorage.setItem(draftKey, JSON.stringify({ content: editor.value, selectionStart: editor.selectionStart, selectionEnd: editor.selectionEnd, updatedAt: Date.now() })); return true; }
+    catch { state.textContent = 'Unsaved changes · local draft is too large'; return false; }
+  };
+  const save = async (manual = false) => {
+    clearTimeout(autosaveTimer);
+    if (saveRunning) { saveAgain = true; return; }
+    if (!manual && revision === savedRevision) return;
+    saveRunning = true;
+    const savingRevision = revision;
+    state.textContent = manual ? 'Saving…' : 'Autosaving…';
+    const saveButton = panel.querySelector('[data-editor-save]');
+    if (saveButton) saveButton.disabled = true;
+    try {
+      const data = new FormData(form);
+      data.set('content', editor.value);
+      data.set('autosave', String(!manual));
+      const response = await fetch(form.action, { method: 'POST', body: data, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      if (!response.ok || response.redirected) throw new Error(await response.text() || 'Save failed.');
+      if (revision === savingRevision) {
+        savedRevision = savingRevision;
+        try { localStorage.removeItem(draftKey); } catch { }
+        state.textContent = manual ? 'Saved' : 'Autosaved';
+      } else {
+        state.textContent = 'New changes waiting to save';
+        saveAgain = true;
+      }
+    } catch (error) {
+      rememberDraft();
+      state.textContent = 'Save failed · draft kept on this device';
+      console.warn('Editor save failed. The local draft was retained.', error);
+      autosaveTimer = setTimeout(() => save(false), 8000);
+    } finally {
+      saveRunning = false;
+      if (saveButton) saveButton.disabled = false;
+      if (saveAgain) { saveAgain = false; autosaveTimer = setTimeout(() => save(false), 500); }
+    }
+  };
+  const changed = () => {
+    revision += 1;
+    rememberDraft();
+    updatePositionAndSuggestions();
+    state.textContent = 'Unsaved changes · autosaves in 4 seconds';
+    clearTimeout(highlightTimer); clearTimeout(autosaveTimer);
+    highlightTimer = setTimeout(updateHighlight, 350);
+    autosaveTimer = setTimeout(() => save(false), autosaveDelay);
+  };
+  const insertCompletion = word => {
+    const start = editor.selectionStart, before = editor.value.slice(0, start), prefix = before.match(/[A-Za-z_$][\w$-]*$/)?.[0] || '';
+    editor.setRangeText(word, start - prefix.length, editor.selectionEnd, 'end'); editor.focus(); changed();
+  };
+  suggestions.addEventListener('click', event => { const button = event.target.closest('[data-completion]'); if (button) insertCompletion(button.dataset.completion); });
+  editor.addEventListener('input', changed);
+  editor.addEventListener('click', updatePositionAndSuggestions);
+  editor.addEventListener('keyup', updatePositionAndSuggestions);
+  editor.addEventListener('select', updatePositionAndSuggestions);
+  editor.addEventListener('scroll', () => { preview.scrollTop = editor.scrollTop; preview.scrollLeft = editor.scrollLeft; });
+  editor.addEventListener('keydown', event => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(true); return; }
+    if (event.key === 'Tab') { event.preventDefault(); editor.setRangeText('  ', editor.selectionStart, editor.selectionEnd, 'end'); changed(); return; }
+    const pairs = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'" };
+    if (pairs[event.key] && editor.selectionStart === editor.selectionEnd) { event.preventDefault(); const start = editor.selectionStart; editor.setRangeText(event.key + pairs[event.key], start, start, 'end'); editor.setSelectionRange(start + 1, start + 1); changed(); }
+  });
+  form.addEventListener('submit', event => { event.preventDefault(); event.stopPropagation(); save(true); });
+  codeToggle.addEventListener('change', () => { updateHighlight(); applyDisplay(); editor.focus(); });
+  darkToggle.addEventListener('change', applyDisplay);
+  let recovered = false;
+  try {
+    const draft = JSON.parse(localStorage.getItem(draftKey) || 'null');
+    if (draft?.content !== undefined && draft.content !== editor.value) {
+      editor.value = draft.content; revision = 1; recovered = true;
+      requestAnimationFrame(() => editor.setSelectionRange(draft.selectionStart || 0, draft.selectionEnd || draft.selectionStart || 0));
+    }
+  } catch { try { localStorage.removeItem(draftKey); } catch { } }
+  updateHighlight(); updatePositionAndSuggestions(); applyDisplay();
+  if (recovered) { state.textContent = 'Recovered unsaved changes · autosaves in 4 seconds'; autosaveTimer = setTimeout(() => save(false), autosaveDelay); }
+  else state.textContent = 'Ready · autosave on';
+}
+
+function initializeImageEditor(panel) {
+  if (!panel || panel.dataset.initialized === 'true') return;
+  panel.dataset.initialized = 'true';
+  const image = panel.querySelector('[data-image-source]'), canvas = panel.querySelector('[data-image-canvas]'), context = canvas.getContext('2d');
+  const brightness = panel.querySelector('[data-image-brightness]'), grayscale = panel.querySelector('[data-image-grayscale]'), state = panel.querySelector('[data-image-state]');
+  let rotation = 0;
+  const draw = () => {
+    const sideways = Math.abs(rotation % 180) === 90;
+    canvas.width = sideways ? image.naturalHeight : image.naturalWidth; canvas.height = sideways ? image.naturalWidth : image.naturalHeight;
+    context.save(); context.translate(canvas.width / 2, canvas.height / 2); context.rotate(rotation * Math.PI / 180);
+    context.filter = `brightness(${brightness.value}%) grayscale(${grayscale.checked ? 100 : 0}%)`;
+    context.drawImage(image, -image.naturalWidth / 2, -image.naturalHeight / 2); context.restore(); state.textContent = 'Preview updated';
+  };
+  image.addEventListener('load', () => { draw(); state.textContent = 'Ready'; });
+  if (image.complete) draw();
+  panel.querySelector('.image-editor-tools').addEventListener('click', event => {
+    const action = event.target.closest('[data-image-action]')?.dataset.imageAction; if (!action) return;
+    if (action === 'rotate-left') rotation -= 90; if (action === 'rotate-right') rotation += 90;
+    if (action === 'reset') { rotation = 0; brightness.value = 100; grayscale.checked = false; } draw();
+  });
+  brightness.addEventListener('input', draw); grayscale.addEventListener('change', draw);
+  const form = panel.querySelector('[data-image-save-form]');
+  if (form) form.addEventListener('submit', () => {
+    const extension = form.querySelector('[name="path"]').value.split('.').pop().toLowerCase();
+    const mime = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg';
+    form.querySelector('[data-image-data]').value = canvas.toDataURL(mime, .92); state.textContent = 'Saving…';
+  });
+}
+
+function initializeFileWorkspace(workspace) {
+  if (!workspace || workspace.dataset.initialized === 'true') return;
+  workspace.dataset.initialized = 'true';
+  const browserHost = workspace.querySelector('[data-file-browser-host]');
+  const previewHost = workspace.querySelector('[data-file-preview-host]');
+  let busy = false;
+  const setPath = path => { const label = workspace.querySelector('[data-workspace-path]'); if (label) label.textContent = `/${path || ''}`; };
+  const loadFolder = async source => {
+    if (busy) return; busy = true;
+    await preserveScroll(async () => {
+      try {
+        const destination = new URL(source, location.href), path = destination.searchParams.get('path') || '';
+        const partial = new URL(workspace.dataset.browserUrl, location.origin); partial.searchParams.set('projectId', workspace.dataset.projectId); if (path) partial.searchParams.set('path', path);
+        const response = await fetch(partial, { credentials: 'same-origin', cache: 'no-store' }); if (!response.ok || response.redirected) throw new Error('Could not open this folder.');
+        browserHost.innerHTML = await response.text(); browserHost.hidden = false; previewHost.hidden = true; previewHost.innerHTML = ''; setPath(path);
+        initializeFileManager(browserHost.querySelector('[data-file-manager]'));
+      } finally { busy = false; }
+    });
+  };
+  const loadPreview = async source => {
+    if (busy) return; busy = true;
+    await preserveScroll(async () => {
+      try {
+        const destination = new URL(source, location.href), partial = new URL(workspace.dataset.previewUrl, location.origin);
+        partial.searchParams.set('projectId', workspace.dataset.projectId); partial.searchParams.set('path', destination.searchParams.get('path') || '');
+        const response = await fetch(partial, { credentials: 'same-origin', cache: 'no-store' }); if (!response.ok || response.redirected) throw new Error(await response.text() || 'Could not preview this file.');
+        previewHost.innerHTML = await response.text(); browserHost.hidden = true; previewHost.hidden = false;
+        initializeTextEditor(previewHost.querySelector('[data-text-editor]')); initializeImageEditor(previewHost.querySelector('[data-image-editor]'));
+      } finally { busy = false; }
+    });
+  };
+  const submitInline = async form => {
+    if (busy || (form.dataset.confirm && !confirm(form.dataset.confirm))) return; busy = true;
+    const button = form.querySelector('button[type="submit"], button:not([type])'); if (button) button.disabled = true;
+    await preserveScroll(async () => {
+      try {
+        const formData = new FormData(form);
+        if (form.matches('[data-selected-files-form]')) {
+          formData.delete('selectedPaths');
+          browserHost.querySelectorAll('[data-file-checkbox]:checked').forEach(checkbox => formData.append('selectedPaths', checkbox.value));
+        }
+        const response = await fetch(form.action, { method: form.method || 'POST', body: formData, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        if (!response.ok || response.redirected) throw new Error(await response.text() || 'The file action failed.');
+        const html = await response.text(), isPreview = form.matches('[data-editor-form], [data-image-save-form]');
+        if (isPreview) { previewHost.innerHTML = html; initializeTextEditor(previewHost.querySelector('[data-text-editor]')); initializeImageEditor(previewHost.querySelector('[data-image-editor]')); }
+        else { browserHost.innerHTML = html; initializeFileManager(browserHost.querySelector('[data-file-manager]')); setPath(browserHost.querySelector('[data-file-manager]')?.dataset.currentPath || ''); }
+      } catch (error) {
+        console.warn('File action failed. Open Messages for details.', error);
+      } finally { busy = false; if (button) button.disabled = false; }
+    });
+  };
+  workspace.addEventListener('click', event => {
+    const back = event.target.closest('[data-file-back]'); if (back) { loadFolder(new URL(`?projectId=${workspace.dataset.projectId}&path=${encodeURIComponent(back.dataset.path || '')}`, location.origin + '/Files')); return; }
+    if (event.target.closest('[data-file-checkbox], .file-select, button, input, textarea, select, label')) return;
+    const item = event.target.closest('[data-file-item]');
     const link = event.target.closest('a[data-file-nav]');
-    if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    loadFolder(link.href);
+    const source = item?.dataset.fileOpenUrl || link?.href; if (!source) return;
+    if (link) event.preventDefault();
+    (item?.dataset.fileDirectory === 'true' || link?.dataset.fileNav === 'true' ? loadFolder : loadPreview)(source);
   });
-  window.addEventListener('popstate', () => {
-    if (location.pathname.toLowerCase().startsWith('/files')) loadFolder(location.href, false);
+  workspace.addEventListener('keydown', event => { const item = event.target.closest('[data-file-item]'); if (item && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); (item.dataset.fileDirectory === 'true' ? loadFolder : loadPreview)(item.dataset.fileOpenUrl); } });
+  workspace.addEventListener('submit', event => {
+    const form = event.target.closest('[data-file-ajax-form], [data-editor-form], [data-image-save-form]'); if (!form) return;
+    event.preventDefault(); submitInline(form);
   });
-  initializeFileManager(fileBrowserHost.querySelector('[data-file-manager]'));
+  initializeFileManager(browserHost.querySelector('[data-file-manager]'));
+  initializeTextEditor(previewHost.querySelector('[data-text-editor]')); initializeImageEditor(previewHost.querySelector('[data-image-editor]'));
+}
+
+document.querySelectorAll('[data-inline-file-workspace]').forEach(initializeFileWorkspace);
+const projectSelector = document.querySelector('[data-file-project-select]');
+const selectedWorkspaceHost = document.querySelector('[data-selected-workspace]');
+if (projectSelector && selectedWorkspaceHost) {
+  const storageKey = 'dan-loop-selected-file-project';
+  const options = [...projectSelector.options];
+  const savedProject = localStorage.getItem(storageKey);
+  if (savedProject && options.some(option => option.value === savedProject)) projectSelector.value = savedProject;
+  else if (options.length) projectSelector.value = options[0].value;
+
+  let projectLoadRunning = false;
+  const loadSelectedProject = async ({ preservePosition = true } = {}) => {
+    const option = projectSelector.selectedOptions[0];
+    if (!option || projectLoadRunning) return;
+    if (selectedWorkspaceHost.dataset.projectId === option.value && selectedWorkspaceHost.querySelector('[data-inline-file-workspace]')) return;
+    projectLoadRunning = true;
+    localStorage.setItem(storageKey, option.value);
+    const load = async () => {
+      selectedWorkspaceHost.setAttribute('aria-busy', 'true');
+      try {
+        const response = await fetch(option.dataset.workspaceUrl, { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok || response.redirected) throw new Error('Could not open this project workspace.');
+        selectedWorkspaceHost.innerHTML = await response.text();
+        selectedWorkspaceHost.dataset.projectId = option.value;
+        initializeFileWorkspace(selectedWorkspaceHost.querySelector('[data-inline-file-workspace]'));
+      } catch (error) {
+        selectedWorkspaceHost.innerHTML = `<div class="notice error">${escapeCode(error.message)}</div>`;
+        delete selectedWorkspaceHost.dataset.projectId;
+      } finally {
+        selectedWorkspaceHost.removeAttribute('aria-busy'); projectLoadRunning = false;
+      }
+    };
+    if (preservePosition) await preserveScroll(load); else await load();
+  };
+  projectSelector.addEventListener('change', () => loadSelectedProject());
+  document.querySelector('.tab[data-tab="files"]')?.addEventListener('click', () => loadSelectedProject({ preservePosition: false }));
+  if (location.hash === '#files') loadSelectedProject({ preservePosition: false });
+}
+
+const runtimePolicyForm = document.querySelector('[data-runtime-policy-form]');
+const allowedToolsSection = document.querySelector('[data-allowed-tools]');
+if (runtimePolicyForm && allowedToolsSection) {
+  const capabilityEnabled = name => runtimePolicyForm.elements.namedItem(name)?.checked === true;
+  const refreshAllowedTools = () => {
+    let visibleCount = 0;
+    allowedToolsSection.querySelectorAll('[data-tool-policy]').forEach(card => {
+      const requirements = (card.dataset.requires || '').split(',').filter(Boolean);
+      const visible = requirements.every(capabilityEnabled);
+      card.hidden = !visible;
+      if (visible) visibleCount += 1;
+    });
+    const count = allowedToolsSection.querySelector('[data-allowed-tool-count]');
+    if (count) count.textContent = `${visibleCount} enabled`;
+    const empty = allowedToolsSection.querySelector('[data-allowed-tools-empty]');
+    if (empty) empty.hidden = visibleCount !== 0;
+  };
+  runtimePolicyForm.querySelectorAll('[data-runtime-capability]').forEach(input => input.addEventListener('change', refreshAllowedTools));
+  refreshAllowedTools();
 }

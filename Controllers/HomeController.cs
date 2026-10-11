@@ -18,6 +18,27 @@ public sealed class HomeController(StateStore store, WorkspaceService workspace)
     public async Task<IActionResult> JobsPartial()
         => PartialView("_JobsList", await BuildDashboardAsync(includeProjectFiles: false));
 
+    [HttpGet]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+    public async Task<IActionResult> MessagesPartial(int take = 10)
+    {
+        ViewBag.Take = Math.Clamp(take, 10, 300);
+        return PartialView("_MessagesList", await BuildDashboardAsync(includeProjectFiles: false));
+    }
+
+    [HttpGet]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+    public async Task<IActionResult> ChatsPartial(int take = 10)
+    {
+        ViewBag.Take = Math.Clamp(take, 10, 300);
+        return PartialView("_ChatsList", await BuildDashboardAsync(includeProjectFiles: false));
+    }
+
+    [HttpGet]
+    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
+    public async Task<IActionResult> PlanStepsPartial()
+        => PartialView("_PlanSteps", await BuildDashboardAsync(includeProjectFiles: false));
+
     [HttpGet, Authorize(Roles = Roles.Admin)]
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     public async Task<IActionResult> ToolAuditPartial()

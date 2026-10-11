@@ -1,0 +1,40 @@
+@model DashboardViewModel
+@{
+    var visibleIds = Model.VisibleProjects.Select(project => project.Id).ToHashSet();
+    var take = ViewBag.Take is int requestedTake ? requestedTake : 10;
+    var allConversations = Model.State.Conversations.Where(item => visibleIds.Contains(item.ProjectId)).OrderByDescending(item => item.UpdatedAt).Take(300).ToList();
+    var conversations = allConversations.Take(take).ToList();
+    var responseVersion = Model.State.Jobs.Where(job => visibleIds.Contains(job.ProjectId)).SelectMany(job => job.AiResponses).Select(item => item.Id.ToString("N"));
+    var version = string.Join('|', allConversations.Select(item => $"{item.Id:N}:{item.UpdatedAt.ToUnixTimeMilliseconds()}").Concat(responseVersion));
+}
+<div data-live-version="@version" data-visible-count="@conversations.Count" data-has-more="@(allConversations.Count > conversations.Count ? "true" : "false")">
+    @if (!conversations.Any()) { <div class="empty">No chats yet.</div> }
+    <div class="chat-list incremental-list-scroll" data-live-scroll>
+    @foreach (var conversation in conversations)
+    {
+        var project = Model.State.Projects.FirstOrDefault(item => item.Id == conversation.ProjectId);
+        var jobs = Model.State.Jobs.Where(item => item.ConversationId == conversation.Id).ToList();
+        var timeline = new List<(DateTimeOffset At, string Role, string Content, string Meta)>();
+        foreach (var message in conversation.Messages.Where(item => item.Role == "user")) timeline.Add((message.CreatedAt, "user", message.Content, "Request"));
+        foreach (var job in jobs)
+        {
+            if (job.AiResponses.Count > 0)
+            {
+                foreach (var response in job.AiResponses) timeline.Add((response.CreatedAt, "assistant", response.Content, $"AI {response.Kind.ToLowerInvariant()} · step {response.Step}"));
+            }
+            else if (!string.IsNullOrWhiteSpace(job.Output)) timeline.Add((job.CompletedAt ?? job.CreatedAt, "assistant", job.Output, "AI response"));
+            if (!string.IsNullOrWhiteSpace(job.Error)) timeline.Add((job.CompletedAt ?? job.CreatedAt, "error", job.Error, "Job error"));
+        }
+        var firstText = timeline.OrderBy(item => item.At).Select(item => item.Content?.Replace('\r', ' ').Replace('\n', ' ').Trim()).FirstOrDefault(text => !string.IsNullOrWhiteSpace(text)) ?? "No text yet";
+        <details class="chat-thread" data-live-key="chat-@conversation.Id">
+            <summary><div class="chat-summary-title"><strong>@conversation.Title</strong><small>@(project?.Name ?? "Unknown project") · @timeline.Count messages</small></div><span class="chat-preview">@firstText</span><time>@conversation.UpdatedAt.ToLocalTime().ToString("g")</time></summary>
+            <div class="chat-scroll">
+            @foreach (var item in timeline.OrderBy(item => item.At))
+            {
+                <article class="chat-message @item.Role"><header><strong>@(item.Role == "user" ? "You" : item.Role == "assistant" ? "AI" : "Error")</strong><span>@item.Meta</span><time>@item.At.ToLocalTime().ToString("g")</time></header><pre>@item.Content</pre></article>
+            }
+            </div>
+        </details>
+    }
+    </div>
+</div>

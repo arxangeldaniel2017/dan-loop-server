@@ -11,7 +11,7 @@
             @foreach (var item in audits)
             {
                 var project = Model.State.Projects.FirstOrDefault(project => project.Id == item.ProjectId);
-                <details class="runtime-audit-item"><summary><span class="badge @item.Status.ToLowerInvariant()">@item.Status</span><strong>@item.Tool</strong><span>@(project?.Name ?? "Unknown project") · step @item.Step</span><time>@item.StartedAt.ToLocalTime().ToString("g")</time></summary><div><p>@item.Summary</p><pre>@item.Output</pre></div></details>
+                <details class="runtime-audit-item"><summary><span class="badge @item.Status.ToLowerInvariant()">@item.Status</span><strong class="audit-tool-name">@item.Tool</strong><span class="audit-project-step">@(project?.Name ?? "Unknown project") · step @item.Step</span><time>@item.StartedAt.ToLocalTime().ToString("g")</time></summary><div><p>@item.Summary</p><pre>@item.Output</pre></div></details>
             }
         </div>
     }

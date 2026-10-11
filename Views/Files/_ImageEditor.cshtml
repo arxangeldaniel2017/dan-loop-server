@@ -1,0 +1,11 @@
+@model ImageEditorViewModel
+<section class="file-preview-panel" data-image-editor data-parent-path="@Model.ParentPath" data-save-enabled="@Model.CanSave.ToString().ToLowerInvariant()">
+    <header class="preview-toolbar"><button type="button" class="secondary" data-file-back data-path="@Model.ParentPath">← Back to files</button><div><strong>@System.IO.Path.GetFileName(Model.Path)</strong><small>Image preview & editor · @Model.Path</small></div><span class="editor-state" data-image-state>Ready</span></header>
+    <div class="image-editor-tools"><button type="button" class="secondary" data-image-action="rotate-left">↶ Rotate</button><button type="button" class="secondary" data-image-action="rotate-right">↷ Rotate</button><label>Brightness <input type="range" min="40" max="160" value="100" data-image-brightness/></label><label class="check"><input type="checkbox" data-image-grayscale/> Grayscale</label><button type="button" class="secondary" data-image-action="reset">Reset</button></div>
+    <div class="image-canvas-wrap"><canvas data-image-canvas></canvas><img data-image-source src="@Url.Action("Preview", "Files", new { projectId = Model.Project.Id, path = Model.Path, v = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() })" alt="@System.IO.Path.GetFileName(Model.Path)" hidden/></div>
+    @if (Model.CanSave)
+    {
+        <form asp-action="SaveImage" method="post" data-image-save-form><input type="hidden" name="projectId" value="@Model.Project.Id"/><input type="hidden" name="path" value="@Model.Path"/><input type="hidden" name="imageData" data-image-data/><button>Save edited image</button><small>The original is retained in project history.</small></form>
+    }
+    else { <p class="form-help">This image format can be previewed here. Convert it to PNG, JPEG, or WebP to save edits.</p> }
+</section>
