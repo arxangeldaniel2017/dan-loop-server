@@ -16,11 +16,20 @@ public sealed class AgentRuntimeClient(HttpClient http, IDataProtectionProvider 
         object toolChoice = requiredTool is not null
             ? new { type = "function", function = new { name = requiredTool } }
             : requireAnyTool ? "required" : "auto";
+        var toolDefinitions = AgentToolExecutor.ToolDefinitions(settings, allowedTools);
+        if (AnthropicProtocol.Handles(model))
+        {
+            using var anthropicRequest = AnthropicProtocol.CreateRequest(model, RevealKey(model), messages, toolDefinitions, toolChoice, maxTokensOverride ?? settings.MaxOutputTokens);
+            using var anthropicResponse = await http.SendAsync(anthropicRequest, cancellationToken);
+            var anthropicBody = await anthropicResponse.Content.ReadAsStringAsync(cancellationToken);
+            if (!anthropicResponse.IsSuccessStatusCode) throw RemoteError(anthropicResponse, anthropicBody);
+            return AnthropicProtocol.ParseStep(anthropicBody);
+        }
         var payload = new
         {
             model = model.ModelId,
             messages,
-            tools = AgentToolExecutor.ToolDefinitions(settings, allowedTools),
+            tools = toolDefinitions,
             tool_choice = toolChoice,
             stream = useStreaming,
             max_tokens = Math.Clamp(maxTokensOverride ?? settings.MaxOutputTokens, 32, 32_768),
@@ -32,12 +41,15 @@ public sealed class AgentRuntimeClient(HttpClient http, IDataProtectionProvider 
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            throw new InvalidOperationException($"Remote model returned {(int)response.StatusCode}: {body[..Math.Min(body.Length, 1000)]}");
+            throw RemoteError(response, body);
         }
         return useStreaming
             ? await ReadStreamingAsync(response, cancellationToken)
             : ParseComplete(await response.Content.ReadAsStringAsync(cancellationToken));
     }
+
+    private string RevealKey(RemoteModel model) => string.IsNullOrEmpty(model.ProtectedApiKey) ? "" : _protector.Unprotect(model.ProtectedApiKey);
+    private static InvalidOperationException RemoteError(HttpResponseMessage response, string body) => new($"Remote model returned {(int)response.StatusCode}: {body[..Math.Min(body.Length, 1000)]}");
 
     private static async Task<AgentModelStep> ReadStreamingAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
