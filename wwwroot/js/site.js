@@ -49,6 +49,51 @@ document.querySelectorAll('[data-auto-dismiss-notice]').forEach(notice => {
 const aiCatalogNode = document.getElementById('ai-provider-catalog');
 let aiCatalog = [];
 try { aiCatalog = aiCatalogNode ? JSON.parse(aiCatalogNode.textContent) : []; } catch { aiCatalog = []; }
+const providerIconUrl = provider => {
+  if (provider?.iconUrl) return provider.iconUrl;
+  const candidate = provider?.apiKeyUrl || provider?.documentationUrl || provider?.pricingUrl || provider?.baseUrl;
+  try { return `${new URL(candidate).origin}/favicon.ico`; } catch { return ''; }
+};
+const createIconSelect = (select, describeOption) => {
+  if (!select || select.dataset.iconSelectReady) return null;
+  select.dataset.iconSelectReady = 'true';
+  select.classList.add('icon-select-native');
+  const root = document.createElement('div'); root.className = 'icon-select';
+  const button = document.createElement('button'); button.type = 'button'; button.className = 'icon-select-button'; button.setAttribute('aria-haspopup', 'listbox'); button.setAttribute('aria-expanded', 'false');
+  const menu = document.createElement('div'); menu.className = 'icon-select-menu'; menu.hidden = true; menu.setAttribute('role', 'listbox');
+  root.append(button, menu); select.insertAdjacentElement('afterend', root);
+  const close = () => { menu.hidden = true; button.setAttribute('aria-expanded', 'false'); root.classList.remove('open'); };
+  const open = () => { menu.hidden = false; button.setAttribute('aria-expanded', 'true'); root.classList.add('open'); menu.querySelector('[aria-selected="true"]')?.focus(); };
+  const renderIdentity = (target, description, includeArrow = false) => {
+    target.replaceChildren();
+    const icon = document.createElement('span'); icon.className = 'icon-select-logo';
+    const fallback = () => { icon.replaceChildren(); icon.textContent = description.label.trim().slice(0, 1).toUpperCase() || '•'; };
+    if (description.icon) { const image = document.createElement('img'); image.src = description.icon; image.alt = ''; image.loading = 'lazy'; image.addEventListener('error', fallback); icon.append(image); } else fallback();
+    const copy = document.createElement('span'); copy.className = 'icon-select-copy';
+    const label = document.createElement('strong'); label.textContent = description.label; copy.append(label);
+    if (description.meta) { const meta = document.createElement('small'); meta.textContent = description.meta; copy.append(meta); }
+    target.append(icon, copy);
+    if (includeArrow) { const arrow = document.createElement('span'); arrow.className = 'icon-select-arrow'; arrow.textContent = '▾'; target.append(arrow); }
+  };
+  const refresh = () => {
+    menu.replaceChildren();
+    [...select.options].forEach((option, index) => {
+      const description = describeOption(option, index);
+      const item = document.createElement('button'); item.type = 'button'; item.className = 'icon-select-option'; item.setAttribute('role', 'option'); item.setAttribute('aria-selected', String(option.value === select.value)); item.disabled = option.disabled;
+      renderIdentity(item, description);
+      item.addEventListener('click', () => { select.value = option.value; select.dispatchEvent(new Event('change', { bubbles: true })); close(); });
+      menu.append(item);
+    });
+    const selected = select.options[select.selectedIndex] || select.options[0];
+    renderIdentity(button, selected ? describeOption(selected, select.selectedIndex) : { label: 'Select' }, true);
+  };
+  button.addEventListener('click', () => menu.hidden ? open() : close());
+  button.addEventListener('keydown', event => { if (event.key === 'Escape') close(); if (event.key === 'ArrowDown' && menu.hidden) { event.preventDefault(); open(); } });
+  select.addEventListener('change', refresh);
+  document.addEventListener('click', event => { if (!root.contains(event.target)) close(); });
+  refresh();
+  return { refresh, close };
+};
 document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
   const providerSelect = form.querySelector('[data-ai-provider]');
   const baseUrl = form.querySelector('input[name="baseUrl"]');
@@ -63,6 +108,8 @@ document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
   const keyHeader = form.querySelector('[data-ai-key-header]');
   const keyHeaderInput = keyHeader?.querySelector('input');
   const links = form.querySelector('[data-provider-links]');
+  let providerPicker;
+  let modelPicker;
   const updateCapabilities = (provider) => {
     const exact = (provider?.models || []).find(item => String(item.id).toLowerCase() === String(modelInput?.value || '').toLowerCase());
     const modelName = String(modelInput?.value || '').toLowerCase();
@@ -112,6 +159,7 @@ document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
       if (modelInput) modelInput.value = '';
       if (customModel) customModel.hidden = true;
       if (customModelInput) { customModelInput.required = false; customModelInput.value = ''; }
+      modelPicker?.refresh();
     }
     if (links) {
       const items = [provider.apiKeyUrl && ['Get API key', provider.apiKeyUrl], provider.documentationUrl && ['Documentation', provider.documentationUrl], provider.pricingUrl && ['Pricing', provider.pricingUrl]].filter(Boolean);
@@ -131,6 +179,14 @@ document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
   modelSelect?.addEventListener('change', updateModel);
   customModelInput?.addEventListener('input', updateModel);
   authenticationSelect?.addEventListener('change', () => updateAuthentication(aiCatalog.find(item => item.id === providerSelect?.value)));
+  providerPicker = createIconSelect(providerSelect, option => {
+    const provider = aiCatalog.find(item => item.id === option.value);
+    return { label: option.textContent, meta: provider?.category || '', icon: providerIconUrl(provider) };
+  });
+  modelPicker = createIconSelect(modelSelect, option => {
+    const provider = aiCatalog.find(item => item.id === providerSelect?.value);
+    return { label: option.textContent, meta: option.value && option.value !== '__custom__' ? option.value : '', icon: providerIconUrl(provider) };
+  });
   updateProvider();
 });
 

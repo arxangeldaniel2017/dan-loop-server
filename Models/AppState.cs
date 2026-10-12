@@ -214,6 +214,8 @@ public sealed class AiProviderCatalogItem
     public string ApiKeyUrl { get; set; } = "";
     public string DocumentationUrl { get; set; } = "";
     public string PricingUrl { get; set; } = "";
+    public string IconUrl { get; set; } = "";
+    public string Category { get; set; } = "AI provider";
     public List<AiModelCatalogItem> Models { get; set; } = [];
 }
 
