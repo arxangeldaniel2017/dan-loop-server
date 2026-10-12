@@ -23,7 +23,7 @@ public sealed class AgentRuntimeController(StateStore store) : Controller
                 AllowFileWrite = allowFileWrite,
                 AllowGitHubPublish = allowGitHubPublish,
                 MaxSteps = Math.Clamp(maxSteps, 1, 50),
-                MaxOutputTokens = Math.Clamp(maxOutputTokens, 32, 32_768),
+                MaxOutputTokens = Math.Max(maxOutputTokens, 32),
                 MaxToolOutputCharacters = Math.Clamp(maxToolOutputCharacters, 1000, 100_000)
             };
             state.Messages.Add(new AppMessage { Level = MessageLevels.Info, Text = "Advanced AI workspace configuration saved." });

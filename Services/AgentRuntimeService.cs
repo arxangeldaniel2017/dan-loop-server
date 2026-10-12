@@ -25,9 +25,21 @@ public sealed class AgentRuntimeService(AgentRuntimeClient client, AgentToolExec
         for (var stepNumber = 1; stepNumber <= maximumSteps; stepNumber++)
         {
             var policy = ToolPolicy(planExisted, changedPaths, unpublishedPaths, requirePublishing, forceImplementationAction, stepNumber);
-            var step = await client.CompleteStepAsync(model, messages, settings, cancellationToken, policy.Allowed, policy.Required, policy.RequireAny, policy.Stream, policy.MaxTokens);
+            var step = await client.CompleteStepAsync(model, messages, settings, cancellationToken, policy.Allowed, policy.Required, policy.RequireAny, policy.Stream);
             var structured = step.ToolCalls.Count > 0;
             var calls = structured ? step.ToolCalls : ParseFallbackToolCalls(step.Content);
+            if (structured && calls.Any(call => !IsValidArguments(call.ArgumentsJson)))
+            {
+                await RecordAiResponseAsync(job.Id, stepNumber, "Incomplete tool request", FormatToolRequest(step.Content, calls));
+                if (stepNumber == maximumSteps)
+                    throw new InvalidOperationException("The model repeatedly returned an incomplete tool call.");
+                messages.Add(new
+                {
+                    role = "user",
+                    content = "Your previous tool call ended with incomplete JSON and was not executed. Retry the tool call with complete valid JSON. Keep file content concise or split the work across multiple files so the response can finish."
+                });
+                continue;
+            }
             if (calls.Count == 0)
             {
                 var final = !string.IsNullOrWhiteSpace(step.Content) ? step.Content : step.Reasoning;
@@ -128,20 +140,30 @@ CURRENT PROJECT GUIDE:
         return result;
     }
 
-    private static (IReadOnlySet<string>? Allowed, string? Required, bool RequireAny, bool? Stream, int? MaxTokens) ToolPolicy(bool planExisted, HashSet<string> changedPaths, HashSet<string> unpublishedPaths, bool requirePublishing, bool forceImplementationAction, int stepNumber)
+    private static (IReadOnlySet<string>? Allowed, string? Required, bool RequireAny, bool? Stream) ToolPolicy(bool planExisted, HashSet<string> changedPaths, HashSet<string> unpublishedPaths, bool requirePublishing, bool forceImplementationAction, int stepNumber)
     {
         var planChanged = changedPaths.Contains("PLAN.md");
         var implementationChanged = changedPaths.Any(IsImplementationPath);
         if (!planExisted && !planChanged)
-            return (new HashSet<string>(["write_file"], StringComparer.OrdinalIgnoreCase), "write_file", false, true, 4096);
+            return (new HashSet<string>(["write_file"], StringComparer.OrdinalIgnoreCase), "write_file", false, true);
         // A plan is already available in the system prompt. Give the model two rounds to inspect
         // existing project files, then require implementation instead of allowing an unbounded
         // read/discuss loop over historical reports.
         if (planExisted && (forceImplementationAction || stepNumber >= 3 || changedPaths.Count > 0) && (!implementationChanged || !planChanged))
-            return (new HashSet<string>(["write_file", "replace_in_file", "generate_asset"], StringComparer.OrdinalIgnoreCase), null, true, true, 4096);
+            return (new HashSet<string>(["write_file", "replace_in_file", "generate_asset"], StringComparer.OrdinalIgnoreCase), null, true, true);
         if (requirePublishing && unpublishedPaths.Count > 0)
-            return (new HashSet<string>(["publish_project_files"], StringComparer.OrdinalIgnoreCase), "publish_project_files", false, true, 2048);
-        return (null, null, false, true, 4096);
+            return (new HashSet<string>(["publish_project_files"], StringComparer.OrdinalIgnoreCase), "publish_project_files", false, true);
+        return (null, null, false, true);
+    }
+
+    private static bool IsValidArguments(string arguments)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(arguments) ? "{}" : arguments);
+            return document.RootElement.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException) { return false; }
     }
 
     private static (string? Outcome, string? Error) ValidateCompletion(bool planExisted, HashSet<string> changedPaths, HashSet<string> unpublishedPaths, bool requirePublishing)

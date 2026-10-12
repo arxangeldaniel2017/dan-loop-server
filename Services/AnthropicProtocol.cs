@@ -53,7 +53,7 @@ internal static class AnthropicProtocol
         var payload = new Dictionary<string, object?>
         {
             ["model"] = model.ModelId, ["system"] = string.Join("\n\n", system), ["messages"] = messages,
-            ["max_tokens"] = Math.Clamp(maxTokens, 32, 32_768), ["temperature"] = 0.2
+            ["max_tokens"] = Math.Max(maxTokens, 32), ["temperature"] = 0.2
         };
         if (tools is { Length: > 0 }) payload["tools"] = tools;
         if (choice is not null) payload["tool_choice"] = choice;

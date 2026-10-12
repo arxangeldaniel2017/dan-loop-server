@@ -223,6 +223,12 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                     }
                     _state.Version = 16;
                 }
+                if (_state.Version < 17)
+                {
+                    if (_state.AgentRuntime.Settings.MaxOutputTokens <= 16_384)
+                        _state.AgentRuntime.Settings.MaxOutputTokens = 65_536;
+                    _state.Version = 17;
+                }
                 await SaveUnsafeAsync();
                 return;
             }

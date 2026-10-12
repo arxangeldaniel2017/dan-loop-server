@@ -10,7 +10,7 @@ public sealed class AgentRuntimeClient(HttpClient http, IDataProtectionProvider 
 {
     private readonly IDataProtector _protector = protectionProvider.CreateProtector("remote-model-api-keys-v1");
 
-    public async Task<AgentModelStep> CompleteStepAsync(RemoteModel model, IReadOnlyList<object> messages, AgentRuntimeSettings settings, CancellationToken cancellationToken, IReadOnlySet<string>? allowedTools = null, string? requiredTool = null, bool requireAnyTool = false, bool? streamOverride = null, int? maxTokensOverride = null)
+    public async Task<AgentModelStep> CompleteStepAsync(RemoteModel model, IReadOnlyList<object> messages, AgentRuntimeSettings settings, CancellationToken cancellationToken, IReadOnlySet<string>? allowedTools = null, string? requiredTool = null, bool requireAnyTool = false, bool? streamOverride = null)
     {
         var useStreaming = streamOverride ?? settings.UseStreaming;
         object toolChoice = requiredTool is not null
@@ -19,7 +19,7 @@ public sealed class AgentRuntimeClient(HttpClient http, IDataProtectionProvider 
         var toolDefinitions = AgentToolExecutor.ToolDefinitions(settings, allowedTools);
         if (AnthropicProtocol.Handles(model))
         {
-            using var anthropicRequest = AnthropicProtocol.CreateRequest(model, RevealKey(model), messages, toolDefinitions, toolChoice, maxTokensOverride ?? settings.MaxOutputTokens);
+            using var anthropicRequest = AnthropicProtocol.CreateRequest(model, RevealKey(model), messages, toolDefinitions, toolChoice, settings.MaxOutputTokens);
             using var anthropicResponse = await http.SendAsync(anthropicRequest, cancellationToken);
             var anthropicBody = await anthropicResponse.Content.ReadAsStringAsync(cancellationToken);
             if (!anthropicResponse.IsSuccessStatusCode) throw RemoteError(anthropicResponse, anthropicBody);
@@ -32,7 +32,6 @@ public sealed class AgentRuntimeClient(HttpClient http, IDataProtectionProvider 
             tools = toolDefinitions,
             tool_choice = toolChoice,
             stream = useStreaming,
-            max_tokens = Math.Clamp(maxTokensOverride ?? settings.MaxOutputTokens, 32, 32_768),
             temperature = 0.2
         };
         using var request = new HttpRequestMessage(HttpMethod.Post, model.BaseUrl.TrimEnd('/') + "/chat/completions") { Content = JsonContent.Create(payload) };
