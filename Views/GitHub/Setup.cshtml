@@ -4,7 +4,7 @@
     <p class="eyebrow">FIRST RUN · STEP 3 OF 4</p>
     <h1>Connect GitHub.</h1>
     <p>Paste a fine-grained personal access token to let this server work with the repositories you selected when creating the token.</p>
-    @if (TempData["Message"] is string message) { <div class="notice">@message</div> }
+    @if (TempData["Message"] is string message) { <div class="notice" data-auto-dismiss-notice role="status"><span>@message</span><button type="button" class="notice-close" data-notice-close aria-label="Dismiss message">×</button><i class="notice-timer" aria-hidden="true"></i></div> }
     <form asp-action="ConnectToken" method="post" class="form-grid">
         <input type="hidden" name="returnUrl" value="/Account/CreateProject" />
         <label class="wide">Fine-grained access token<input name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="github_pat_…" /></label>

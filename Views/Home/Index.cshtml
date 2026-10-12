@@ -11,7 +11,7 @@
     <div class="metrics"><div><strong>@Model.VisibleProjects.Count</strong><span>projects</span></div><div><strong>@Model.State.Loops.Count(x => x.IsEnabled)</strong><span>live loops</span></div></div>
 </section>
 
-@if (TempData["Message"] is string message) { <div class="notice">@message</div> }
+@if (TempData["Message"] is string message) { <div class="notice" data-auto-dismiss-notice role="status"><span>@message</span><button type="button" class="notice-close" data-notice-close aria-label="Dismiss message">×</button><i class="notice-timer" aria-hidden="true"></i></div> }
 
 <nav class="tabs">
     <button class="tab active" data-tab="projects">Projects</button><button class="tab" data-tab="steps">Steps</button><button class="tab" data-tab="jobs">Jobs</button><button class="tab" data-tab="files">Files</button><button class="tab" data-tab="chats">Messages</button>
@@ -131,7 +131,7 @@
         <form asp-controller="Manage" asp-action="CreateModel" method="post" class="form-grid" data-ai-connection-form>
             <label>Connection type<select name="providerId" data-ai-provider>@foreach (var provider in Model.State.AiProviderCatalog) { <option value="@provider.Id" data-base-url="@provider.BaseUrl">@provider.Name</option> }</select></label>
             <label>Display name<input name="name" required placeholder="My AI connection" /></label>
-            <label>Model ID<input name="modelId" list="connection-model-list" required placeholder="Select or enter a model" /></label><datalist id="connection-model-list"></datalist>
+            <label>Model<select data-ai-model-select required><option value="">Select a model</option></select></label><label data-ai-custom-model hidden>Other model ID<input data-ai-custom-model-input autocomplete="off" spellcheck="false" /></label><input type="hidden" name="modelId" data-ai-model-value />
             <label>Priority<input name="priority" type="number" min="1" max="999" value="100" /><small>Lower numbers are tried first.</small></label>
             <label class="wide">Base URL<input name="baseUrl" type="url" required value="@Model.State.AiProviderCatalog.FirstOrDefault()?.BaseUrl" /></label>
             <label data-ai-authentication>Authentication<select name="authenticationType" data-ai-authentication-select>@foreach (var type in AiAuthenticationTypes.All) { <option value="@type">@type</option> }</select></label>

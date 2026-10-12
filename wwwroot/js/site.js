@@ -11,25 +11,58 @@ document.querySelectorAll('.tab').forEach(button => {
 const initialTab = location.hash.slice(1);
 if (initialTab) document.querySelector(`.tab[data-tab="${CSS.escape(initialTab)}"]`)?.click();
 
+document.querySelectorAll('[data-auto-dismiss-notice]').forEach(notice => {
+  const text = notice.querySelector('span')?.textContent?.trim() || notice.textContent.trim();
+  const isImportant = /error|failed|cannot|invalid|denied|warning|blocked/i.test(text);
+  const duration = Math.min(isImportant ? 20000 : 14000, Math.max(isImportant ? 9000 : 4000, 2800 + text.length * 55));
+  const timerBar = notice.querySelector('.notice-timer');
+  let remaining = duration;
+  let startedAt = 0;
+  let timerId;
+  const dismiss = () => {
+    clearTimeout(timerId);
+    notice.classList.add('notice-leaving');
+    setTimeout(() => notice.remove(), 260);
+  };
+  const start = () => {
+    clearTimeout(timerId);
+    startedAt = performance.now();
+    timerId = setTimeout(dismiss, remaining);
+    if (timerBar) {
+      timerBar.style.transition = `transform ${remaining}ms linear`;
+      requestAnimationFrame(() => { timerBar.style.transform = 'scaleX(0)'; });
+    }
+  };
+  const pause = () => {
+    clearTimeout(timerId);
+    remaining = Math.max(0, remaining - (performance.now() - startedAt));
+    if (timerBar) { timerBar.style.transition = 'none'; timerBar.style.transform = `scaleX(${remaining / duration})`; }
+  };
+  notice.addEventListener('mouseenter', pause);
+  notice.addEventListener('mouseleave', start);
+  notice.addEventListener('focusin', pause);
+  notice.addEventListener('focusout', event => { if (!notice.contains(event.relatedTarget)) start(); });
+  notice.querySelector('[data-notice-close]')?.addEventListener('click', dismiss);
+  start();
+});
+
 const aiCatalogNode = document.getElementById('ai-provider-catalog');
 let aiCatalog = [];
 try { aiCatalog = aiCatalogNode ? JSON.parse(aiCatalogNode.textContent) : []; } catch { aiCatalog = []; }
-document.querySelectorAll('[data-ai-connection-form]').forEach((form, formIndex) => {
+document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
   const providerSelect = form.querySelector('[data-ai-provider]');
   const baseUrl = form.querySelector('input[name="baseUrl"]');
-  const modelInput = form.querySelector('input[name="modelId"]');
+  const modelInput = form.querySelector('[data-ai-model-value]');
+  const modelSelect = form.querySelector('[data-ai-model-select]');
+  const customModel = form.querySelector('[data-ai-custom-model]');
+  const customModelInput = form.querySelector('[data-ai-custom-model-input]');
   const authentication = form.querySelector('[data-ai-authentication]');
   const authenticationSelect = form.querySelector('[data-ai-authentication-select]');
   const apiKey = form.querySelector('[data-ai-api-key]');
   const apiKeyInput = apiKey?.querySelector('input');
   const keyHeader = form.querySelector('[data-ai-key-header]');
   const keyHeaderInput = keyHeader?.querySelector('input');
-  let modelList = form.querySelector('datalist');
   const links = form.querySelector('[data-provider-links]');
-  if (modelList && document.querySelectorAll(`#${CSS.escape(modelList.id)}`).length > 1) {
-    modelList.id = `${modelList.id}-${formIndex}`;
-    modelInput?.setAttribute('list', modelList.id);
-  }
   const updateCapabilities = (provider) => {
     const exact = (provider?.models || []).find(item => String(item.id).toLowerCase() === String(modelInput?.value || '').toLowerCase());
     const modelName = String(modelInput?.value || '').toLowerCase();
@@ -70,7 +103,16 @@ document.querySelectorAll('[data-ai-connection-form]').forEach((form, formIndex)
       baseUrl.readOnly = !provider.requiresBaseUrl && Boolean(provider.baseUrl);
       baseUrl.closest('label')?.classList.toggle('connection-field-fixed', baseUrl.readOnly);
     }
-    if (modelList) modelList.innerHTML = (provider.models || []).map(model => `<option value="${String(model.id).replaceAll('&', '&amp;').replaceAll('"', '&quot;')}">${String(model.name).replaceAll('&', '&amp;').replaceAll('<', '&lt;')}</option>`).join('');
+    if (modelSelect) {
+      modelSelect.replaceChildren();
+      modelSelect.add(new Option('Select a model', ''));
+      (provider.models || []).filter(model => model.id !== 'custom').forEach(model => modelSelect.add(new Option(model.name, model.id)));
+      modelSelect.add(new Option('Other model ID…', '__custom__'));
+      modelSelect.value = '';
+      if (modelInput) modelInput.value = '';
+      if (customModel) customModel.hidden = true;
+      if (customModelInput) { customModelInput.required = false; customModelInput.value = ''; }
+    }
     if (links) {
       const items = [provider.apiKeyUrl && ['Get API key', provider.apiKeyUrl], provider.documentationUrl && ['Documentation', provider.documentationUrl], provider.pricingUrl && ['Pricing', provider.pricingUrl]].filter(Boolean);
       links.innerHTML = items.map(([label, url]) => `<a href="${url}" target="_blank" rel="noopener">${label} ↗</a>`).join('');
@@ -78,9 +120,16 @@ document.querySelectorAll('[data-ai-connection-form]').forEach((form, formIndex)
     updateAuthentication(provider);
     updateCapabilities(provider);
   };
+  const updateModel = () => {
+    const custom = modelSelect?.value === '__custom__';
+    if (customModel) customModel.hidden = !custom;
+    if (customModelInput) customModelInput.required = custom;
+    if (modelInput) modelInput.value = custom ? (customModelInput?.value.trim() || '') : (modelSelect?.value || '');
+    updateCapabilities(aiCatalog.find(item => item.id === providerSelect?.value));
+  };
   providerSelect?.addEventListener('change', updateProvider);
-  modelInput?.addEventListener('input', () => updateCapabilities(aiCatalog.find(item => item.id === providerSelect?.value)));
-  modelInput?.addEventListener('change', () => updateCapabilities(aiCatalog.find(item => item.id === providerSelect?.value)));
+  modelSelect?.addEventListener('change', updateModel);
+  customModelInput?.addEventListener('input', updateModel);
   authenticationSelect?.addEventListener('change', () => updateAuthentication(aiCatalog.find(item => item.id === providerSelect?.value)));
   updateProvider();
 });

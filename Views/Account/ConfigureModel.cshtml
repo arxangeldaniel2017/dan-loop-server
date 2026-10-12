@@ -14,8 +14,7 @@
     <form method="post" data-ai-connection-form>
         <label>Connection type<select name="providerId" data-ai-provider>@foreach (var provider in catalog) { <option value="@provider.Id" data-base-url="@provider.BaseUrl" data-docs="@provider.DocumentationUrl" data-key-url="@provider.ApiKeyUrl" data-pricing="@provider.PricingUrl">@provider.Name</option> }</select></label>
         <label>Display name<input name="name" value="@(Context.Request.HasFormContentType ? Context.Request.Form["name"] : "My AI")" required autofocus /></label>
-        <label>Model ID<input name="modelId" list="wizard-model-list" required placeholder="Select or enter a model" /></label>
-        <datalist id="wizard-model-list"></datalist>
+        <label>Model<select data-ai-model-select required><option value="">Select a model</option></select></label><label data-ai-custom-model hidden>Other model ID<input data-ai-custom-model-input autocomplete="off" spellcheck="false" /></label><input type="hidden" name="modelId" data-ai-model-value />
         <label>Model URL<input name="baseUrl" value="@(Context.Request.HasFormContentType ? Context.Request.Form["baseUrl"] : catalog.FirstOrDefault()?.BaseUrl)" type="url" required /></label>
         <label data-ai-authentication>Authentication<select name="authenticationType" data-ai-authentication-select>@foreach (var type in AiAuthenticationTypes.All) { <option value="@type">@type</option> }</select></label>
         <label data-ai-key-header hidden>Header name<input name="apiKeyHeaderName" value="api-key" /></label>
