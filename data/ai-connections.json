@@ -131,6 +131,156 @@
     ]
   },
   {
+    "id": "deepinfra", "name": "DeepInfra", "category": "Universal AI API", "baseUrl": "https://api.deepinfra.com/v1/openai", "iconUrl": "https://deepinfra.com/favicon.ico",
+    "apiKeyUrl": "https://deepinfra.com/dash/api_keys", "documentationUrl": "https://deepinfra.com/docs/advanced/openai_api", "pricingUrl": "https://deepinfra.com/pricing",
+    "models": [{ "id": "deepseek-ai/DeepSeek-V3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "name": "Llama 3.3 70B", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }]
+  },
+  {
+    "id": "novita", "name": "Novita AI", "category": "Universal AI API", "baseUrl": "https://api.novita.ai/v3/openai", "iconUrl": "https://novita.ai/favicon.ico",
+    "apiKeyUrl": "https://novita.ai/settings/key-management", "documentationUrl": "https://novita.ai/docs/api-reference/model-apis-llm-create-chat-completion", "pricingUrl": "https://novita.ai/pricing",
+    "models": [{ "id": "deepseek/deepseek-v3-0324", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "custom", "name": "Other Novita model", "capabilities": ["Generator", "Image", "Video", "Files"] }]
+  },
+  {
+    "id": "nebius", "name": "Nebius AI Studio", "category": "Universal AI API", "baseUrl": "https://api.studio.nebius.com/v1", "iconUrl": "https://nebius.com/favicon.ico",
+    "apiKeyUrl": "https://console.nebius.com/", "documentationUrl": "https://docs.nebius.com/studio/inference/quickstart", "pricingUrl": "https://nebius.com/prices-ai-studio",
+    "models": [{ "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct", "name": "Qwen3 Coder", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "custom", "name": "Other Nebius model", "capabilities": ["Generator", "Image", "Files"] }]
+  },
+  {
+    "id": "hyperbolic", "name": "Hyperbolic", "category": "Universal AI API", "baseUrl": "https://api.hyperbolic.xyz/v1", "iconUrl": "https://www.hyperbolic.xyz/favicon.ico",
+    "apiKeyUrl": "https://app.hyperbolic.xyz/settings", "documentationUrl": "https://docs.hyperbolic.xyz/", "pricingUrl": "https://www.hyperbolic.xyz/",
+    "models": [{ "id": "deepseek-ai/DeepSeek-V3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "custom", "name": "Other Hyperbolic model", "capabilities": ["Generator", "Image", "Files"] }]
+  },
+  {
+    "id": "replicate", "name": "Replicate", "category": "Universal AI API", "baseUrl": "", "requiresBaseUrl": true, "iconUrl": "https://replicate.com/favicon.ico",
+    "apiKeyUrl": "https://replicate.com/account/api-tokens", "documentationUrl": "https://replicate.com/docs", "pricingUrl": "https://replicate.com/pricing",
+    "models": [{ "id": "custom", "name": "Deployment or model version", "capabilities": ["Generator", "Image", "Audio", "Video", "Files"] }]
+  },
+  {
+    "id": "fal", "name": "fal.ai", "category": "Universal AI API", "baseUrl": "", "requiresBaseUrl": true, "authenticationType": "API key header", "apiKeyHeaderName": "Authorization", "iconUrl": "https://fal.ai/favicon.ico",
+    "apiKeyUrl": "https://fal.ai/dashboard/keys", "documentationUrl": "https://docs.fal.ai/", "pricingUrl": "https://fal.ai/pricing",
+    "models": [{ "id": "custom", "name": "fal endpoint model", "capabilities": ["Generator", "Image", "Audio", "Video", "Files"] }]
+  },
+  {
+    "id": "baseten", "name": "Baseten", "category": "Universal AI API", "baseUrl": "", "requiresBaseUrl": true, "iconUrl": "https://www.baseten.co/favicon.ico",
+    "apiKeyUrl": "https://app.baseten.co/settings/api_keys", "documentationUrl": "https://docs.baseten.co/invoke/openai-client", "pricingUrl": "https://www.baseten.co/pricing",
+    "models": [{ "id": "custom", "name": "Deployed Baseten model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Image", "Audio", "Video", "Files"] }]
+  },
+  {
+    "id": "siliconflow", "name": "SiliconFlow", "category": "Universal AI API", "baseUrl": "https://api.siliconflow.com/v1", "iconUrl": "https://siliconflow.com/favicon.ico",
+    "apiKeyUrl": "https://cloud.siliconflow.com/account/ak", "documentationUrl": "https://docs.siliconflow.com/", "pricingUrl": "https://siliconflow.com/pricing",
+    "models": [{ "id": "deepseek-ai/DeepSeek-V3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "custom", "name": "Other SiliconFlow model", "capabilities": ["Generator", "Image", "Audio", "Video", "Files"] }]
+  },
+  {
+    "id": "featherless", "name": "Featherless AI", "category": "Universal AI API", "baseUrl": "https://api.featherless.ai/v1", "iconUrl": "https://featherless.ai/favicon.ico",
+    "apiKeyUrl": "https://featherless.ai/account/api-keys", "documentationUrl": "https://featherless.ai/docs", "pricingUrl": "https://featherless.ai/pricing",
+    "models": [{ "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct", "name": "Qwen3 Coder", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "custom", "name": "Other Featherless model", "capabilities": ["Generator", "Files"] }]
+  },
+  {
+    "id": "anthropic", "name": "Anthropic", "category": "Model developer", "baseUrl": "https://api.anthropic.com/v1", "authenticationType": "API key header", "apiKeyHeaderName": "x-api-key", "iconUrl": "https://console.anthropic.com/favicon.ico",
+    "apiKeyUrl": "https://console.anthropic.com/settings/keys", "documentationUrl": "https://docs.anthropic.com/en/api/messages", "pricingUrl": "https://www.anthropic.com/pricing",
+    "models": [{ "id": "claude-opus-4-1", "name": "Claude Opus 4.1", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "claude-sonnet-4-0", "name": "Claude Sonnet 4", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }]
+  },
+  {
+    "id": "cohere", "name": "Cohere", "category": "Model developer", "baseUrl": "https://api.cohere.com/compatibility/v1", "iconUrl": "https://cohere.com/favicon.ico",
+    "apiKeyUrl": "https://dashboard.cohere.com/api-keys", "documentationUrl": "https://docs.cohere.com/docs/compatibility-api", "pricingUrl": "https://cohere.com/pricing",
+    "models": [{ "id": "command-a-03-2025", "name": "Command A", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "command-r-plus", "name": "Command R+", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }]
+  },
+  {
+    "id": "zai", "name": "Z.ai", "category": "Model developer", "baseUrl": "https://api.z.ai/api/paas/v4", "iconUrl": "https://z.ai/favicon.ico",
+    "apiKeyUrl": "https://z.ai/manage-apikey/apikey-list", "documentationUrl": "https://docs.z.ai/", "pricingUrl": "https://z.ai/subscribe",
+    "models": [{ "id": "glm-4.5", "name": "GLM-4.5", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "glm-4.5-air", "name": "GLM-4.5 Air", "capabilities": ["Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }]
+  },
+  {
+    "id": "moonshot", "name": "Moonshot AI", "category": "Model developer", "baseUrl": "https://api.moonshot.ai/v1", "iconUrl": "https://platform.moonshot.ai/favicon.ico",
+    "apiKeyUrl": "https://platform.moonshot.ai/console/api-keys", "documentationUrl": "https://platform.moonshot.ai/docs", "pricingUrl": "https://platform.moonshot.ai/docs/pricing/chat",
+    "models": [{ "id": "kimi-k2-0711-preview", "name": "Kimi K2", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "custom", "name": "Other Moonshot model", "capabilities": ["Generator", "Files"] }]
+  },
+  {
+    "id": "minimax", "name": "MiniMax", "category": "Model developer", "baseUrl": "https://api.minimax.io/v1", "iconUrl": "https://www.minimax.io/favicon.ico",
+    "apiKeyUrl": "https://platform.minimax.io/user-center/basic-information/interface-key", "documentationUrl": "https://platform.minimax.io/docs/api-reference/text-openai-api", "pricingUrl": "https://platform.minimax.io/",
+    "models": [{ "id": "MiniMax-M2", "name": "MiniMax M2", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "custom", "name": "Other MiniMax model", "capabilities": ["Generator", "Image", "Audio", "Video", "Files"] }]
+  },
+  {
+    "id": "perplexity", "name": "Perplexity", "category": "Model developer", "baseUrl": "https://api.perplexity.ai", "iconUrl": "https://www.perplexity.ai/favicon.ico",
+    "apiKeyUrl": "https://www.perplexity.ai/settings/api", "documentationUrl": "https://docs.perplexity.ai/", "pricingUrl": "https://docs.perplexity.ai/getting-started/pricing",
+    "models": [{ "id": "sonar-pro", "name": "Sonar Pro", "capabilities": ["Planner", "Generator", "Files"] }, { "id": "sonar", "name": "Sonar", "capabilities": ["Generator", "Files"] }]
+  },
+  {
+    "id": "ai21", "name": "AI21 Labs", "category": "Model developer", "baseUrl": "https://api.ai21.com/studio/v1", "iconUrl": "https://www.ai21.com/favicon.ico",
+    "apiKeyUrl": "https://studio.ai21.com/account/api-key", "documentationUrl": "https://docs.ai21.com/", "pricingUrl": "https://www.ai21.com/pricing",
+    "models": [{ "id": "jamba-large", "name": "Jamba Large", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "custom", "name": "Other AI21 model", "capabilities": ["Generator", "Files"] }]
+  },
+  {
+    "id": "stability", "name": "Stability AI", "category": "Model developer", "baseUrl": "", "requiresBaseUrl": true, "iconUrl": "https://platform.stability.ai/favicon.ico",
+    "apiKeyUrl": "https://platform.stability.ai/account/keys", "documentationUrl": "https://platform.stability.ai/docs/api-reference", "pricingUrl": "https://platform.stability.ai/pricing",
+    "models": [{ "id": "stable-image-ultra", "name": "Stable Image Ultra", "capabilities": ["Generator", "Image", "Files"] }, { "id": "custom", "name": "Other Stability model", "capabilities": ["Generator", "Image", "Audio", "Video", "Files"] }]
+  },
+  {
+    "id": "elevenlabs", "name": "ElevenLabs", "category": "Model developer", "baseUrl": "", "requiresBaseUrl": true, "authenticationType": "API key header", "apiKeyHeaderName": "xi-api-key", "iconUrl": "https://elevenlabs.io/favicon.ico",
+    "apiKeyUrl": "https://elevenlabs.io/app/settings/api-keys", "documentationUrl": "https://elevenlabs.io/docs/api-reference", "pricingUrl": "https://elevenlabs.io/pricing",
+    "models": [{ "id": "eleven_multilingual_v2", "name": "Eleven Multilingual v2", "capabilities": ["Generator", "Audio", "Files"] }, { "id": "custom", "name": "Other ElevenLabs model", "capabilities": ["Generator", "Audio", "Files"] }]
+  },
+  {
+    "id": "vertex", "name": "Google Vertex AI", "category": "Cloud AI platform", "baseUrl": "", "requiresBaseUrl": true, "iconUrl": "https://cloud.google.com/favicon.ico",
+    "apiKeyUrl": "https://console.cloud.google.com/vertex-ai", "documentationUrl": "https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library", "pricingUrl": "https://cloud.google.com/vertex-ai/generative-ai/pricing",
+    "models": [{ "id": "google/gemini-2.5-pro", "name": "Gemini 2.5 Pro", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Image", "Audio", "Video", "Files"] }, { "id": "custom", "name": "Vertex endpoint model", "capabilities": ["Generator", "Files"] }]
+  },
+  {
+    "id": "digitalocean", "name": "DigitalOcean Gradient AI", "category": "Cloud AI platform", "baseUrl": "", "requiresBaseUrl": true, "iconUrl": "https://www.digitalocean.com/favicon.ico",
+    "apiKeyUrl": "https://cloud.digitalocean.com/gen-ai", "documentationUrl": "https://docs.digitalocean.com/products/gradient-ai-platform/", "pricingUrl": "https://www.digitalocean.com/pricing/gradient-ai",
+    "models": [{ "id": "custom", "name": "Gradient endpoint model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }]
+  },
+  {
+    "id": "watsonx", "name": "IBM watsonx.ai", "category": "Cloud AI platform", "baseUrl": "", "requiresBaseUrl": true, "authenticationType": "API key header", "apiKeyHeaderName": "Authorization", "iconUrl": "https://www.ibm.com/favicon.ico",
+    "apiKeyUrl": "https://dataplatform.cloud.ibm.com/", "documentationUrl": "https://cloud.ibm.com/apidocs/watsonx-ai", "pricingUrl": "https://www.ibm.com/products/watsonx-ai/pricing",
+    "models": [{ "id": "custom", "name": "watsonx deployment model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }]
+  },
+  {
+    "id": "oci", "name": "Oracle OCI Generative AI", "category": "Cloud AI platform", "baseUrl": "", "requiresBaseUrl": true, "allowsAuthenticationSelection": true, "iconUrl": "https://www.oracle.com/favicon.ico",
+    "apiKeyUrl": "https://cloud.oracle.com/", "documentationUrl": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/home.htm", "pricingUrl": "https://www.oracle.com/cloud/price-list/",
+    "models": [{ "id": "custom", "name": "OCI endpoint model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }]
+  },
+  {
+    "id": "databricks", "name": "Databricks Model Serving", "category": "Cloud AI platform", "baseUrl": "", "requiresBaseUrl": true, "iconUrl": "https://www.databricks.com/favicon.ico",
+    "apiKeyUrl": "https://accounts.cloud.databricks.com/", "documentationUrl": "https://docs.databricks.com/aws/en/machine-learning/model-serving/score-foundation-models", "pricingUrl": "https://www.databricks.com/product/pricing/model-serving",
+    "models": [{ "id": "custom", "name": "Serving endpoint name", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }]
+  },
+  {
+    "id": "modal", "name": "Modal", "category": "GPU / serverless hosting", "baseUrl": "", "requiresBaseUrl": true, "allowsAuthenticationSelection": true, "iconUrl": "https://modal.com/favicon.ico",
+    "apiKeyUrl": "https://modal.com/settings", "documentationUrl": "https://modal.com/docs/guide/webhooks", "pricingUrl": "https://modal.com/pricing",
+    "models": [{ "id": "custom", "name": "Deployed OpenAI-compatible model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Image", "Audio", "Video", "Files"] }]
+  },
+  {
+    "id": "vast", "name": "Vast.ai", "category": "GPU / serverless hosting", "baseUrl": "", "requiresBaseUrl": true, "allowsAuthenticationSelection": true, "iconUrl": "https://vast.ai/favicon.ico",
+    "apiKeyUrl": "https://cloud.vast.ai/account/", "documentationUrl": "https://docs.vast.ai/", "pricingUrl": "https://vast.ai/",
+    "models": [{ "id": "custom", "name": "Hosted OpenAI-compatible model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Image", "Audio", "Video", "Files"] }]
+  },
+  {
+    "id": "lambda", "name": "Lambda", "category": "GPU / serverless hosting", "baseUrl": "", "requiresBaseUrl": true, "allowsAuthenticationSelection": true, "iconUrl": "https://lambda.ai/favicon.ico",
+    "apiKeyUrl": "https://cloud.lambda.ai/", "documentationUrl": "https://docs.lambda.ai/", "pricingUrl": "https://lambda.ai/pricing",
+    "models": [{ "id": "custom", "name": "Hosted OpenAI-compatible model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }]
+  },
+  {
+    "id": "coreweave", "name": "CoreWeave", "category": "GPU / serverless hosting", "baseUrl": "", "requiresBaseUrl": true, "allowsAuthenticationSelection": true, "iconUrl": "https://www.coreweave.com/favicon.ico",
+    "apiKeyUrl": "https://console.coreweave.com/", "documentationUrl": "https://docs.coreweave.com/", "pricingUrl": "https://www.coreweave.com/pricing",
+    "models": [{ "id": "custom", "name": "Hosted OpenAI-compatible model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Image", "Audio", "Video", "Files"] }]
+  },
+  {
+    "id": "gmi", "name": "GMI Cloud", "category": "GPU / serverless hosting", "baseUrl": "", "requiresBaseUrl": true, "allowsAuthenticationSelection": true, "iconUrl": "https://www.gmicloud.ai/favicon.ico",
+    "apiKeyUrl": "https://platform.gmicloud.ai/", "documentationUrl": "https://docs.gmicloud.ai/", "pricingUrl": "https://www.gmicloud.ai/pricing",
+    "models": [{ "id": "custom", "name": "Hosted OpenAI-compatible model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }]
+  },
+  {
+    "id": "lepton", "name": "Lepton AI", "category": "GPU / serverless hosting", "baseUrl": "", "requiresBaseUrl": true, "iconUrl": "https://www.lepton.ai/favicon.ico",
+    "apiKeyUrl": "https://dashboard.lepton.ai/", "documentationUrl": "https://www.lepton.ai/docs", "pricingUrl": "https://www.lepton.ai/pricing",
+    "models": [{ "id": "custom", "name": "Lepton endpoint model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Image", "Audio", "Video", "Files"] }]
+  },
+  {
+    "id": "paperspace", "name": "Paperspace", "category": "GPU / serverless hosting", "baseUrl": "", "requiresBaseUrl": true, "allowsAuthenticationSelection": true, "iconUrl": "https://www.paperspace.com/favicon.ico",
+    "apiKeyUrl": "https://console.paperspace.com/", "documentationUrl": "https://docs.digitalocean.com/products/paperspace/", "pricingUrl": "https://www.paperspace.com/pricing",
+    "models": [{ "id": "custom", "name": "Hosted OpenAI-compatible model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Image", "Audio", "Video", "Files"] }]
+  },
+  {
     "id": "ollama", "name": "Ollama", "baseUrl": "http://host.docker.internal:11434/v1",
     "authenticationType": "No authentication", "apiKeyRequired": false,
     "documentationUrl": "https://docs.ollama.com/api/openai-compatibility", "pricingUrl": "https://ollama.com/",
