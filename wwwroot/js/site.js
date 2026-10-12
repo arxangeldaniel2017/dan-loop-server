@@ -146,7 +146,7 @@ document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
     const provider = aiCatalog.find(item => item.id === providerSelect?.value);
     if (!provider) return;
     if (baseUrl) {
-      baseUrl.value = provider.baseUrl || baseUrl.value;
+      baseUrl.value = provider.baseUrl || '';
       baseUrl.readOnly = !provider.requiresBaseUrl && Boolean(provider.baseUrl);
       baseUrl.closest('label')?.classList.toggle('connection-field-fixed', baseUrl.readOnly);
     }

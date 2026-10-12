@@ -192,6 +192,8 @@ public sealed class RemoteModel
     public string ProtectedApiKey { get; set; } = "";
     public string AuthenticationType { get; set; } = AiAuthenticationTypes.BearerToken;
     public string ApiKeyHeaderName { get; set; } = "Authorization";
+    public string ApiKeyPrefix { get; set; } = "";
+    public string ApiProtocol { get; set; } = AiApiProtocols.OpenAiChat;
     public bool IsEnabled { get; set; } = true;
     public int Priority { get; set; } = 100;
     public List<string> Capabilities { get; set; } = [];
@@ -209,6 +211,8 @@ public sealed class AiProviderCatalogItem
     public bool RequiresBaseUrl { get; set; }
     public string AuthenticationType { get; set; } = AiAuthenticationTypes.BearerToken;
     public string ApiKeyHeaderName { get; set; } = "Authorization";
+    public string ApiKeyPrefix { get; set; } = "";
+    public string ApiProtocol { get; set; } = AiApiProtocols.OpenAiChat;
     public bool ApiKeyRequired { get; set; } = true;
     public bool AllowsAuthenticationSelection { get; set; }
     public string ApiKeyUrl { get; set; } = "";
@@ -217,6 +221,14 @@ public sealed class AiProviderCatalogItem
     public string IconUrl { get; set; } = "";
     public string Category { get; set; } = "AI provider";
     public List<AiModelCatalogItem> Models { get; set; } = [];
+}
+
+public static class AiApiProtocols
+{
+    public const string OpenAiChat = "OpenAI chat";
+    public const string AnthropicMessages = "Anthropic messages";
+    public const string NativeGeneration = "Native generation";
+    public static readonly string[] All = [OpenAiChat, AnthropicMessages, NativeGeneration];
 }
 
 public static class AiAuthenticationTypes

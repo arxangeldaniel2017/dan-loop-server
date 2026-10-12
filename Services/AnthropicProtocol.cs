@@ -6,7 +6,8 @@ namespace DanLoopServer.Services;
 
 internal static class AnthropicProtocol
 {
-    public static bool Handles(RemoteModel model) => model.ProviderId.Equals("anthropic", StringComparison.OrdinalIgnoreCase);
+    public static bool Handles(RemoteModel model) => model.ApiProtocol.Equals(AiApiProtocols.AnthropicMessages, StringComparison.OrdinalIgnoreCase)
+        || model.ProviderId.Equals("anthropic", StringComparison.OrdinalIgnoreCase);
 
     public static HttpRequestMessage CreateRequest(RemoteModel model, string apiKey, IReadOnlyList<object> openAiMessages,
         IReadOnlyList<object>? openAiTools, object? openAiToolChoice, int maxTokens)

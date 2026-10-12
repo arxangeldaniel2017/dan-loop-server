@@ -13,6 +13,7 @@ public sealed class AiConnectionCatalogService(StateStore store, IWebHostEnviron
         await using var stream = File.OpenRead(_path);
         var catalog = await JsonSerializer.DeserializeAsync<List<AiProviderCatalogItem>>(stream,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, cancellationToken) ?? [];
+        ValidateCatalog(catalog);
         await store.UpdateAsync(state =>
         {
             state.AiProviderCatalog = catalog;
@@ -63,6 +64,23 @@ public sealed class AiConnectionCatalogService(StateStore store, IWebHostEnviron
         var header = provider?.AllowsAuthenticationSelection == true ? requestedHeader : provider?.ApiKeyHeaderName;
         model.ApiKeyHeaderName = model.AuthenticationType == AiAuthenticationTypes.ApiKeyHeader
             ? (string.IsNullOrWhiteSpace(header) ? "api-key" : header.Trim()) : "Authorization";
+        model.ApiKeyPrefix = provider?.ApiKeyPrefix?.Trim() ?? "";
+        model.ApiProtocol = provider?.ApiProtocol is string protocol && AiApiProtocols.All.Contains(protocol)
+            ? protocol : AiApiProtocols.OpenAiChat;
+    }
+
+    private static void ValidateCatalog(IReadOnlyList<AiProviderCatalogItem> catalog)
+    {
+        if (catalog.Count == 0) throw new InvalidDataException("The AI provider catalog is empty.");
+        var duplicate = catalog.GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase).FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null) throw new InvalidDataException($"Duplicate AI provider id: {duplicate.Key}.");
+        foreach (var provider in catalog)
+        {
+            if (string.IsNullOrWhiteSpace(provider.Id) || string.IsNullOrWhiteSpace(provider.Name)) throw new InvalidDataException("Every AI provider requires an id and name.");
+            if (!AiApiProtocols.All.Contains(provider.ApiProtocol)) throw new InvalidDataException($"Provider {provider.Id} has unsupported protocol '{provider.ApiProtocol}'.");
+            if (provider.Models.Count == 0) throw new InvalidDataException($"Provider {provider.Id} has no model choices.");
+            if (!provider.RequiresBaseUrl && string.IsNullOrWhiteSpace(provider.BaseUrl)) throw new InvalidDataException($"Provider {provider.Id} requires a catalog base URL or requiresBaseUrl=true.");
+        }
     }
 
     private static string InferProvider(IEnumerable<AiProviderCatalogItem> catalog, string baseUrl)

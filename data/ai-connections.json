@@ -151,12 +151,12 @@
     "models": [{ "id": "deepseek-ai/DeepSeek-V3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "custom", "name": "Other Hyperbolic model", "capabilities": ["Generator", "Image", "Files"] }]
   },
   {
-    "id": "replicate", "name": "Replicate", "category": "Universal AI API", "baseUrl": "", "requiresBaseUrl": true, "iconUrl": "https://replicate.com/favicon.ico",
+    "id": "replicate", "name": "Replicate", "category": "Universal AI API", "apiProtocol": "Native generation", "baseUrl": "https://api.replicate.com/v1", "iconUrl": "https://replicate.com/favicon.ico",
     "apiKeyUrl": "https://replicate.com/account/api-tokens", "documentationUrl": "https://replicate.com/docs", "pricingUrl": "https://replicate.com/pricing",
     "models": [{ "id": "custom", "name": "Deployment or model version", "capabilities": ["Generator", "Image", "Audio", "Video", "Files"] }]
   },
   {
-    "id": "fal", "name": "fal.ai", "category": "Universal AI API", "baseUrl": "", "requiresBaseUrl": true, "authenticationType": "API key header", "apiKeyHeaderName": "Authorization", "iconUrl": "https://fal.ai/favicon.ico",
+    "id": "fal", "name": "fal.ai", "category": "Universal AI API", "apiProtocol": "Native generation", "baseUrl": "https://queue.fal.run", "authenticationType": "API key header", "apiKeyHeaderName": "Authorization", "apiKeyPrefix": "Key", "iconUrl": "https://fal.ai/favicon.ico",
     "apiKeyUrl": "https://fal.ai/dashboard/keys", "documentationUrl": "https://docs.fal.ai/", "pricingUrl": "https://fal.ai/pricing",
     "models": [{ "id": "custom", "name": "fal endpoint model", "capabilities": ["Generator", "Image", "Audio", "Video", "Files"] }]
   },
@@ -176,7 +176,7 @@
     "models": [{ "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct", "name": "Qwen3 Coder", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "custom", "name": "Other Featherless model", "capabilities": ["Generator", "Files"] }]
   },
   {
-    "id": "anthropic", "name": "Anthropic", "category": "Model developer", "baseUrl": "https://api.anthropic.com/v1", "authenticationType": "API key header", "apiKeyHeaderName": "x-api-key", "iconUrl": "https://console.anthropic.com/favicon.ico",
+    "id": "anthropic", "name": "Anthropic", "category": "Model developer", "apiProtocol": "Anthropic messages", "baseUrl": "https://api.anthropic.com/v1", "authenticationType": "API key header", "apiKeyHeaderName": "x-api-key", "iconUrl": "https://console.anthropic.com/favicon.ico",
     "apiKeyUrl": "https://console.anthropic.com/settings/keys", "documentationUrl": "https://docs.anthropic.com/en/api/messages", "pricingUrl": "https://www.anthropic.com/pricing",
     "models": [{ "id": "claude-opus-4-1", "name": "Claude Opus 4.1", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "claude-sonnet-4-0", "name": "Claude Sonnet 4", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }]
   },
@@ -211,12 +211,12 @@
     "models": [{ "id": "jamba-large", "name": "Jamba Large", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }, { "id": "custom", "name": "Other AI21 model", "capabilities": ["Generator", "Files"] }]
   },
   {
-    "id": "stability", "name": "Stability AI", "category": "Model developer", "baseUrl": "", "requiresBaseUrl": true, "iconUrl": "https://platform.stability.ai/favicon.ico",
+    "id": "stability", "name": "Stability AI", "category": "Model developer", "apiProtocol": "Native generation", "baseUrl": "https://api.stability.ai", "iconUrl": "https://platform.stability.ai/favicon.ico",
     "apiKeyUrl": "https://platform.stability.ai/account/keys", "documentationUrl": "https://platform.stability.ai/docs/api-reference", "pricingUrl": "https://platform.stability.ai/pricing",
     "models": [{ "id": "stable-image-ultra", "name": "Stable Image Ultra", "capabilities": ["Generator", "Image", "Files"] }, { "id": "custom", "name": "Other Stability model", "capabilities": ["Generator", "Image", "Audio", "Video", "Files"] }]
   },
   {
-    "id": "elevenlabs", "name": "ElevenLabs", "category": "Model developer", "baseUrl": "", "requiresBaseUrl": true, "authenticationType": "API key header", "apiKeyHeaderName": "xi-api-key", "iconUrl": "https://elevenlabs.io/favicon.ico",
+    "id": "elevenlabs", "name": "ElevenLabs", "category": "Model developer", "apiProtocol": "Native generation", "baseUrl": "https://api.elevenlabs.io/v1", "authenticationType": "API key header", "apiKeyHeaderName": "xi-api-key", "iconUrl": "https://elevenlabs.io/favicon.ico",
     "apiKeyUrl": "https://elevenlabs.io/app/settings/api-keys", "documentationUrl": "https://elevenlabs.io/docs/api-reference", "pricingUrl": "https://elevenlabs.io/pricing",
     "models": [{ "id": "eleven_multilingual_v2", "name": "Eleven Multilingual v2", "capabilities": ["Generator", "Audio", "Files"] }, { "id": "custom", "name": "Other ElevenLabs model", "capabilities": ["Generator", "Audio", "Files"] }]
   },
