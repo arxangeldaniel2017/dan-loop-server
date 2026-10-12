@@ -2,7 +2,7 @@ namespace DanLoopServer.Models;
 
 public sealed class AppState
 {
-    public int Version { get; set; } = 21;
+    public int Version { get; set; } = 22;
     public List<AppUser> Users { get; set; } = [];
     public List<Project> Projects { get; set; } = [];
     public List<LoopDefinition> Loops { get; set; } = [];
@@ -129,6 +129,7 @@ public sealed class ProjectPlanStep
     public Guid Id { get; set; } = Guid.NewGuid();
     public int Order { get; set; }
     public string Title { get; set; } = "";
+    public bool IsActive { get; set; } = true;
     public string Status { get; set; } = PlanStepStatuses.Pending;
     public int? RetryLimit { get; set; }
     public List<PlanStepAttempt> Attempts { get; set; } = [];

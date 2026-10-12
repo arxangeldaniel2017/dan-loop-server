@@ -258,6 +258,12 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                     }
                     _state.Version = 21;
                 }
+                if (_state.Version < 22)
+                {
+                    foreach (var step in _state.ExecutionPlans.SelectMany(plan => plan.Steps))
+                        step.IsActive = true;
+                    _state.Version = 22;
+                }
                 await SaveUnsafeAsync();
                 return;
             }

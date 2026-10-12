@@ -400,7 +400,28 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
         return Path.GetRelativePath(root, destination).Replace('\\', '/');
     }
 
-    public static bool IsText(string path) => new[] { ".txt", ".md", ".json", ".xml", ".yaml", ".yml", ".csv", ".tsv", ".html", ".css", ".js", ".ts", ".cs", ".py", ".sh", ".sql", ".log", ".svg" }.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+    public static bool IsText(string path)
+    {
+        if (new[] { ".txt", ".md", ".json", ".xml", ".yaml", ".yml", ".csv", ".tsv", ".html", ".css", ".js", ".ts", ".cs", ".py", ".sh", ".sql", ".log", ".svg" }
+            .Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)) return true;
+        if (!File.Exists(path)) return false;
+
+        try
+        {
+            using var stream = File.OpenRead(path);
+            if (stream.Length == 0) return true;
+            var sample = new byte[Math.Min(stream.Length, 4096)];
+            var count = stream.Read(sample, 0, sample.Length);
+            if (sample.AsSpan(0, count).Contains((byte)0)) return false;
+            var encoding = new UTF8Encoding(false, true);
+            var characters = new char[encoding.GetMaxCharCount(count)];
+            encoding.GetDecoder().Convert(sample, 0, count, characters, 0, characters.Length, stream.Length == count, out _, out _, out _);
+            return true;
+        }
+        catch (DecoderFallbackException) { return false; }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
     public static bool IsImage(string path) => new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" }.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 
     private WorkspaceEntry ToEntry(string root, FileSystemInfo info)

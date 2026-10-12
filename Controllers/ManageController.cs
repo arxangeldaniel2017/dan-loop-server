@@ -196,7 +196,7 @@ public sealed class ManageController(StateStore store, PasswordService passwords
         if (!await CanAsync(projectId, manage: true)) return Forbid();
         if (retryLimit is <= 0) return Back("Retry limit must be a positive number or blank for unlimited.");
         await plans.SetRetryLimitAsync(projectId, stepId, retryLimit);
-        return Back(retryLimit is null ? "Step retries are unlimited." : $"Step retry limit set to {retryLimit}.");
+        return Steps(PlanStepMutationResult.Ok(retryLimit is null ? "Step retries are unlimited." : $"Step retry limit set to {retryLimit}."));
     }
 
     [HttpPost, ValidateAntiForgeryToken]
@@ -204,7 +204,7 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     {
         if (!await CanAsync(projectId, manage: true)) return Forbid();
         await plans.RetryAsync(projectId, stepId);
-        return Back("Step queued for another attempt.");
+        return Steps(PlanStepMutationResult.Ok("Step queued for another attempt."));
     }
 
     [HttpPost, ValidateAntiForgeryToken]
@@ -212,7 +212,43 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     {
         if (!await CanAsync(projectId, manage: true)) return Forbid();
         await plans.SkipAsync(projectId, stepId);
-        return Back("Step skipped. The next eligible step can continue.");
+        return Steps(PlanStepMutationResult.Ok("Step skipped. The next eligible step can continue."));
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> AddPlanStep(Guid projectId, string? title)
+    {
+        if (!await CanAsync(projectId, manage: true)) return Forbid();
+        return Steps(await plans.AddStepAsync(projectId, title ?? ""));
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> TogglePlanStep(Guid projectId, Guid stepId)
+    {
+        if (!await CanAsync(projectId, manage: true)) return Forbid();
+        return Steps(await plans.ToggleStepAsync(projectId, stepId));
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> DeletePlanStep(Guid projectId, Guid stepId)
+    {
+        if (!await CanAsync(projectId, manage: true)) return Forbid();
+        return Steps(await plans.DeleteStepAsync(projectId, stepId));
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> MovePlanStep(Guid projectId, Guid stepId, int direction)
+    {
+        if (!await CanAsync(projectId, manage: true)) return Forbid();
+        if (direction is not (-1 or 1)) return Steps(PlanStepMutationResult.Fail("Move direction is invalid."));
+        return Steps(await plans.MoveStepAsync(projectId, stepId, direction));
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> ReorderPlanSteps(Guid projectId, List<Guid>? stepIds)
+    {
+        if (!await CanAsync(projectId, manage: true)) return Forbid();
+        return Steps(await plans.ReorderStepsAsync(projectId, stepIds ?? []));
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
@@ -634,5 +670,12 @@ public sealed class ManageController(StateStore store, PasswordService passwords
 
     private IActionResult Connections(string message, string? returnUrl = null) { TempData["Message"] = message; return Url.IsLocalUrl(returnUrl) ? LocalRedirect(returnUrl!) : Redirect("/#connections"); }
     private IActionResult Users(string message) { TempData["Message"] = message; return Redirect("/#access"); }
+    private IActionResult Steps(PlanStepMutationResult result)
+    {
+        if (Request.Headers.XRequestedWith == "XMLHttpRequest")
+            return result.Success ? Ok(new { result.Message }) : BadRequest(new { result.Message });
+        TempData["Message"] = result.Message;
+        return Redirect("/#steps");
+    }
     private IActionResult Back(string message) { TempData["Message"] = message; return RedirectToAction("Index", "Home"); }
 }

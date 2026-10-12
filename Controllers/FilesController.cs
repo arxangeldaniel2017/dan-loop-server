@@ -122,6 +122,30 @@ public sealed class FilesController(StateStore store, WorkspaceService workspace
         catch (Exception ex) { return await FileBrowserResultAsync(projectId, path, $"Create folder failed: {ex.Message}", true); }
     }
 
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> CreateTextFile(Guid projectId, string? path, string name)
+    {
+        if (await GetProjectAsync(projectId, manage: true) is null) return Forbid();
+        try
+        {
+            var fileName = name?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(fileName) || fileName is "." or ".." ||
+                fileName.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '\\']) >= 0 ||
+                fileName.Any(character => char.IsControl(character) || Path.GetInvalidFileNameChars().Contains(character)))
+                throw new InvalidOperationException("Enter a valid file name without a folder path.");
+
+            var relative = WorkspaceService.NormalizeRelativePath(Path.Combine(path ?? "", fileName));
+            var full = await workspace.ResolveProjectPathAsync(projectId, relative);
+            if (System.IO.File.Exists(full) || Directory.Exists(full))
+                throw new InvalidOperationException($"An item named '{fileName}' already exists.");
+
+            await using (new FileStream(full, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, useAsync: true)) { }
+            await workspace.MarkUserManagedAsync(projectId, [relative]);
+            return await FileBrowserResultAsync(projectId, path, $"Text file created: {relative}.");
+        }
+        catch (Exception ex) { return await FileBrowserResultAsync(projectId, path, $"Create text file failed: {ex.Message}", true); }
+    }
+
     [HttpGet]
     public async Task<IActionResult> Preview(Guid projectId, string path)
     {

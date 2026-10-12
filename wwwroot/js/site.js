@@ -674,8 +674,9 @@ document.addEventListener('submit', async event => {
 
 const planStepsHost = document.getElementById('plan-steps-list');
 let planStepsRefreshing = false;
+let planStepsDragging = false;
 async function refreshPlanSteps() {
-  if (!planStepsHost || planStepsRefreshing || document.hidden) return;
+  if (!planStepsHost || planStepsRefreshing || planStepsDragging || document.hidden) return;
   planStepsRefreshing = true;
   try {
     const response = await fetch(planStepsHost.dataset.planStepsUrl, { credentials: 'same-origin', cache: 'no-store' });
@@ -690,10 +691,78 @@ async function refreshPlanSteps() {
     planStepsHost.innerHTML = html;
     planStepsHost.querySelectorAll('.plan-step').forEach(item => { const id = item.querySelector('input[name="stepId"]')?.value; if (id && openSteps.has(id)) item.open = true; });
     planStepsHost.querySelectorAll('.plan-board').forEach(item => { item.open = openPlans.has(item.dataset.planId); });
+    initializePlanStepManagement();
   } catch {
     // Keep the durable step log visible while the server is temporarily unavailable.
   } finally { planStepsRefreshing = false; }
 }
+function initializePlanStepManagement() {
+  if (!planStepsHost) return;
+  planStepsHost.querySelectorAll('[data-plan-sortable]').forEach(sortable => {
+    if (sortable.dataset.sortableReady) return;
+    sortable.dataset.sortableReady = 'true';
+    let dragged = null;
+    let originalOrder = [];
+    let dropped = false;
+    const reset = () => {
+      dragged?.classList.remove('dragging');
+      sortable.querySelectorAll('.drag-target').forEach(item => item.classList.remove('drag-target'));
+      dragged = null;
+      planStepsDragging = false;
+    };
+    sortable.addEventListener('click', event => {
+      if (event.target.closest('.plan-step-drag')) event.preventDefault();
+    });
+    sortable.addEventListener('dragstart', event => {
+      const handle = event.target.closest('.plan-step-drag');
+      if (!handle) return;
+      dragged = handle.closest('.plan-step');
+      if (!dragged) return;
+      originalOrder = [...sortable.querySelectorAll(':scope > .plan-step')];
+      dropped = false;
+      planStepsDragging = true;
+      dragged.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', dragged.dataset.stepId);
+    });
+    sortable.addEventListener('dragover', event => {
+      if (!dragged) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      const target = event.target.closest('.plan-step');
+      if (!target || target === dragged || target.parentElement !== sortable) return;
+      sortable.querySelectorAll('.drag-target').forEach(item => item.classList.remove('drag-target'));
+      target.classList.add('drag-target');
+      const after = event.clientY > target.getBoundingClientRect().top + target.offsetHeight / 2;
+      target[after ? 'after' : 'before'](dragged);
+    });
+    sortable.addEventListener('drop', async event => {
+      if (!dragged) return;
+      event.preventDefault();
+      dropped = true;
+      const body = new FormData();
+      body.append('projectId', sortable.dataset.projectId);
+      sortable.querySelectorAll(':scope > .plan-step').forEach(item => body.append('stepIds', item.dataset.stepId));
+      const token = planStepsHost.querySelector('input[name="__RequestVerificationToken"]')?.value;
+      if (token) body.append('__RequestVerificationToken', token);
+      try {
+        const response = await fetch(sortable.dataset.reorderUrl, { method: 'POST', body, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        if (!response.ok) throw new Error((await response.json().catch(() => null))?.message || 'Could not reorder steps.');
+        reset();
+        await refreshPlanSteps();
+      } catch (error) {
+        originalOrder.forEach(item => sortable.append(item));
+        console.warn(error);
+        reset();
+      }
+    });
+    sortable.addEventListener('dragend', () => {
+      if (!dropped) originalOrder.forEach(item => sortable.append(item));
+      reset();
+    });
+  });
+}
+initializePlanStepManagement();
 document.querySelector('.tab[data-tab="steps"]')?.addEventListener('click', refreshPlanSteps);
 if (planStepsHost) setInterval(refreshPlanSteps, 3000);
 

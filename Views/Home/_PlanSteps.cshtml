@@ -2,7 +2,7 @@
 @{
     bool CanManage(Guid projectId) => Model.IsAdmin || Model.State.Permissions.Any(x => x.UserId == Model.CurrentUserId && x.ProjectId == projectId && x.CanManage);
     var plans = Model.State.ExecutionPlans.Where(plan => Model.VisibleProjects.Any(project => project.Id == plan.ProjectId)).OrderBy(plan => Model.VisibleProjects.First(project => project.Id == plan.ProjectId).Name).ToList();
-    var version = string.Join('|', plans.SelectMany(plan => plan.Steps).Select(step => $"{step.Id}:{step.Status}:{step.RetryLimit}:{step.Attempts.Count}:{step.Attempts.LastOrDefault()?.Status}"));
+    var version = string.Join('|', plans.SelectMany(plan => plan.Steps).OrderBy(step => step.Order).Select(step => $"{step.Id}:{step.Order}:{step.Title}:{step.IsActive}:{step.Status}:{step.RetryLimit}:{step.Attempts.Count}:{step.Attempts.LastOrDefault()?.Status}"));
 }
 <div data-plan-steps-version="@version">
 @if (plans.Count == 0)
@@ -17,23 +17,29 @@
             <div><h3>@project.Name</h3><p>@plan.Steps.Count(step => step.Status == PlanStepStatuses.Succeeded) of @plan.Steps.Count steps succeeded · updated @plan.UpdatedAt.ToLocalTime().ToString("g")</p></div>
             <span class="pill">Server managed</span>
         </summary>
-        <div class="plan-step-list">
-        @foreach (var step in plan.Steps.OrderBy(item => item.Order))
+        @{ var orderedSteps = plan.Steps.OrderBy(item => item.Order).ToList(); }
+        <div class="plan-step-list" data-plan-sortable data-project-id="@project.Id" data-reorder-url="@Url.Action("ReorderPlanSteps", "Manage")">
+        @for (var stepIndex = 0; stepIndex < orderedSteps.Count; stepIndex++)
         {
-            var latest = step.Attempts.OrderByDescending(item => item.Number).FirstOrDefault();
-            <details class="plan-step @step.Status.ToLowerInvariant()" open="@(step.Status is PlanStepStatuses.Running or PlanStepStatuses.Retrying or PlanStepStatuses.Failed)">
+            var step = orderedSteps[stepIndex];
+            <details class="plan-step @step.Status.ToLowerInvariant() @(!step.IsActive ? "inactive" : "") @(CanManage(project.Id) ? "manageable" : "")" data-step-id="@step.Id" open="@(step.Status is PlanStepStatuses.Running or PlanStepStatuses.Retrying or PlanStepStatuses.Failed)">
                 <summary>
+                    @if (CanManage(project.Id)) { <span class="plan-step-drag" draggable="true" role="button" tabindex="0" aria-label="Drag to reorder @step.Title" title="Drag to reorder">⠿</span> }
                     <span class="plan-step-number">@step.Order</span>
                     <span class="plan-step-copy"><strong>@step.Title</strong><small>@step.Attempts.Count attempt@(step.Attempts.Count == 1 ? "" : "s") · retry limit @(step.RetryLimit?.ToString() ?? "unlimited")</small></span>
-                    <span class="badge @step.Status.ToLowerInvariant()">@step.Status</span>
+                    <span class="plan-step-badges">@if (!step.IsActive) { <span class="badge inactive">Inactive</span> }<span class="badge @step.Status.ToLowerInvariant()">@step.Status</span></span>
                 </summary>
                 <div class="plan-step-body">
                     @if (CanManage(project.Id))
                     {
                         <div class="plan-step-actions">
                             <form asp-controller="Manage" asp-action="SetPlanStepRetryLimit" method="post"><input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="stepId" value="@step.Id"/><label>Retry limit<input type="number" name="retryLimit" min="1" value="@step.RetryLimit" placeholder="Unlimited"/></label><button class="secondary">Save</button></form>
+                            <form asp-controller="Manage" asp-action="TogglePlanStep" method="post"><input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="stepId" value="@step.Id"/><button class="secondary">@(step.IsActive ? "Deactivate" : "Activate")</button></form>
+                            <form asp-controller="Manage" asp-action="MovePlanStep" method="post"><input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="stepId" value="@step.Id"/><input type="hidden" name="direction" value="-1"/><button class="secondary" disabled="@(stepIndex == 0)" aria-label="Move @step.Title up">↑ Up</button></form>
+                            <form asp-controller="Manage" asp-action="MovePlanStep" method="post"><input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="stepId" value="@step.Id"/><input type="hidden" name="direction" value="1"/><button class="secondary" disabled="@(stepIndex == orderedSteps.Count - 1)" aria-label="Move @step.Title down">↓ Down</button></form>
                             @if (step.Status is PlanStepStatuses.Failed or PlanStepStatuses.Skipped) { <form asp-controller="Manage" asp-action="RetryPlanStep" method="post"><input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="stepId" value="@step.Id"/><button class="secondary">Retry step</button></form> }
                             @if (step.Status is not PlanStepStatuses.Succeeded and not PlanStepStatuses.Skipped) { <form asp-controller="Manage" asp-action="SkipPlanStep" method="post" onsubmit="return confirm('Skip this plan step?')"><input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="stepId" value="@step.Id"/><button class="link-danger">Skip</button></form> }
+                            <form asp-controller="Manage" asp-action="DeletePlanStep" method="post" onsubmit="return confirm('Delete this step and its attempt history?')"><input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="stepId" value="@step.Id"/><button class="link-danger">Delete</button></form>
                         </div>
                     }
                     @if (step.Attempts.Count == 0) { <p class="muted">Waiting for its first execution.</p> }
@@ -51,6 +57,14 @@
             </details>
         }
         </div>
+        @if (CanManage(project.Id))
+        {
+            <form class="plan-step-add" asp-controller="Manage" asp-action="AddPlanStep" method="post">
+                <input type="hidden" name="projectId" value="@project.Id"/>
+                <label><span>Add a step</span><input name="title" maxlength="500" placeholder="Describe the next step" required/></label>
+                <button>Add to end</button>
+            </form>
+        }
     </details>
 }
 </div>

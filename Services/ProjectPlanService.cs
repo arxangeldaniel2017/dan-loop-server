@@ -176,6 +176,91 @@ public sealed class ProjectPlanService(StateStore store, WorkspaceService worksp
         return true;
     });
 
+    public Task<PlanStepMutationResult> AddStepAsync(Guid projectId, string title) => MutatePlanAsync(projectId, plan =>
+    {
+        var trimmed = title.Trim();
+        if (trimmed.Length == 0) return PlanStepMutationResult.Fail("Step title is required.");
+        if (trimmed.Contains('\r') || trimmed.Contains('\n')) return PlanStepMutationResult.Fail("Step title must be a single line.");
+        if (trimmed.Length > 500) return PlanStepMutationResult.Fail("Step title must be 500 characters or fewer.");
+        if (plan.Steps.Any(step => Normalize(step.Title) == Normalize(trimmed)))
+            return PlanStepMutationResult.Fail("A step with that title already exists.");
+        plan.Steps.Add(new ProjectPlanStep { Order = plan.Steps.Count + 1, Title = trimmed });
+        NormalizeOrder(plan);
+        return PlanStepMutationResult.Ok("Step added at the end of the plan.");
+    });
+
+    public Task<PlanStepMutationResult> ToggleStepAsync(Guid projectId, Guid stepId) => MutatePlanAsync(projectId, plan =>
+    {
+        var step = plan.Steps.FirstOrDefault(item => item.Id == stepId);
+        if (step is null) return PlanStepMutationResult.Fail("Step was not found.");
+        if (step.Status == PlanStepStatuses.Running)
+            return PlanStepMutationResult.Fail("A running step cannot be deactivated. Cancel its job first.");
+        step.IsActive = !step.IsActive;
+        return PlanStepMutationResult.Ok(step.IsActive ? "Step activated." : "Step deactivated.");
+    });
+
+    public Task<PlanStepMutationResult> DeleteStepAsync(Guid projectId, Guid stepId) => MutatePlanAsync(projectId, plan =>
+    {
+        var step = plan.Steps.FirstOrDefault(item => item.Id == stepId);
+        if (step is null) return PlanStepMutationResult.Fail("Step was not found.");
+        if (step.Status == PlanStepStatuses.Running)
+            return PlanStepMutationResult.Fail("A running step cannot be deleted. Cancel its job first.");
+        plan.Steps.Remove(step);
+        NormalizeOrder(plan);
+        return PlanStepMutationResult.Ok("Step deleted.");
+    });
+
+    public Task<PlanStepMutationResult> MoveStepAsync(Guid projectId, Guid stepId, int direction) => MutatePlanAsync(projectId, plan =>
+    {
+        var ordered = plan.Steps.OrderBy(item => item.Order).ToList();
+        var index = ordered.FindIndex(item => item.Id == stepId);
+        if (index < 0) return PlanStepMutationResult.Fail("Step was not found.");
+        var destination = index + Math.Sign(direction);
+        if (destination < 0 || destination >= ordered.Count)
+            return PlanStepMutationResult.Fail("Step is already at the edge of the plan.");
+        (ordered[index], ordered[destination]) = (ordered[destination], ordered[index]);
+        for (var item = 0; item < ordered.Count; item++) ordered[item].Order = item + 1;
+        return PlanStepMutationResult.Ok(direction < 0 ? "Step moved up." : "Step moved down.");
+    });
+
+    public Task<PlanStepMutationResult> ReorderStepsAsync(Guid projectId, IReadOnlyCollection<Guid> stepIds) => MutatePlanAsync(projectId, plan =>
+    {
+        var requested = stepIds.ToList();
+        if (requested.Count != plan.Steps.Count || requested.Distinct().Count() != requested.Count ||
+            requested.Any(id => plan.Steps.All(step => step.Id != id)))
+            return PlanStepMutationResult.Fail("The step order is stale. Refresh and try again.");
+        var byId = plan.Steps.ToDictionary(step => step.Id);
+        for (var index = 0; index < requested.Count; index++) byId[requested[index]].Order = index + 1;
+        return PlanStepMutationResult.Ok("Step order updated.");
+    });
+
+    private async Task<PlanStepMutationResult> MutatePlanAsync(Guid projectId, Func<ProjectExecutionPlan, PlanStepMutationResult> mutation)
+    {
+        var result = await store.UpdateAsync(state =>
+        {
+            var plan = state.ExecutionPlans.FirstOrDefault(item => item.ProjectId == projectId);
+            if (plan is null) return (Result: PlanStepMutationResult.Fail("Plan was not found."), Markdown: (string?)null);
+            var mutationResult = mutation(plan);
+            if (!mutationResult.Success) return (Result: mutationResult, Markdown: (string?)null);
+            plan.UpdatedAt = DateTimeOffset.UtcNow;
+            var markdown = Render(plan);
+            plan.LastMarkdown = markdown;
+            return (Result: mutationResult, Markdown: (string?)markdown);
+        });
+        if (result.Markdown is not null)
+        {
+            var path = await workspace.ResolveProjectPathAsync(projectId, "PLAN.md");
+            await File.WriteAllTextAsync(path, result.Markdown);
+        }
+        return result.Result;
+    }
+
+    private static void NormalizeOrder(ProjectExecutionPlan plan)
+    {
+        var ordered = plan.Steps.OrderBy(item => item.Order).ToList();
+        for (var index = 0; index < ordered.Count; index++) ordered[index].Order = index + 1;
+    }
+
     private Task SynchronizeAsync(Guid projectId, string markdown) => store.UpdateAsync(state =>
     {
         var parsed = Parse(markdown);
@@ -214,20 +299,43 @@ public sealed class ProjectPlanService(StateStore store, WorkspaceService worksp
     private static string Render(ProjectExecutionPlan plan)
     {
         var lines = plan.LastMarkdown.Split('\n').ToList();
+        var checklistIndexes = lines.Select((line, index) => (line, index)).Where(item => Checklist.IsMatch(item.line)).Select(item => item.index).ToList();
+        var renderedSteps = plan.Steps.OrderBy(item => item.Order).Select(step =>
+        {
+            var done = step.Status is PlanStepStatuses.Succeeded or PlanStepStatuses.Skipped ? "x" : " ";
+            return $"- [{done}] {step.Title}";
+        }).ToList();
+        if (checklistIndexes.Count == 0)
+        {
+            var stepsHeading = lines.FindLastIndex(line => Regex.IsMatch(line, @"^\s*#{1,6}\s+Steps\s*$", RegexOptions.IgnoreCase));
+            if (stepsHeading >= 0)
+            {
+                lines.InsertRange(stepsHeading + 1, renderedSteps);
+                return string.Join('\n', lines);
+            }
+            if (lines.Count > 0 && lines[^1].Length > 0) lines.Add("");
+            lines.Add("## Steps");
+            lines.AddRange(renderedSteps);
+            return string.Join('\n', lines);
+        }
+        var checklistSet = checklistIndexes.ToHashSet();
+        var output = new List<string>();
         for (var index = 0; index < lines.Count; index++)
         {
-            var match = Checklist.Match(lines[index]);
-            if (!match.Success) continue;
-            var step = plan.Steps.FirstOrDefault(item => Normalize(item.Title) == Normalize(match.Groups["title"].Value));
-            if (step is null) continue;
-            var done = step.Status is PlanStepStatuses.Succeeded or PlanStepStatuses.Skipped ? "x" : " ";
-            lines[index] = new Regex(@"\[[ xX]\]").Replace(lines[index], $"[{done}]", 1);
+            if (index == checklistIndexes[0]) output.AddRange(renderedSteps);
+            if (!checklistSet.Contains(index)) output.Add(lines[index]);
         }
-        return string.Join('\n', lines);
+        return string.Join('\n', output);
     }
 
-    private static bool IsEligible(ProjectPlanStep step) => step.Status is PlanStepStatuses.Pending or PlanStepStatuses.Retrying or PlanStepStatuses.Running or PlanStepStatuses.Paused
+    private static bool IsEligible(ProjectPlanStep step) => step.IsActive && (step.Status is PlanStepStatuses.Pending or PlanStepStatuses.Retrying or PlanStepStatuses.Running or PlanStepStatuses.Paused)
         && (step.RetryLimit is null || step.Attempts.Count < step.RetryLimit || step.Status == PlanStepStatuses.Running);
     private static string Normalize(string value) => Regex.Replace(value.Trim(), @"^\d+[.)]\s*", "").Trim().ToLowerInvariant();
-    private static ProjectPlanStep CloneStep(ProjectPlanStep step) => new() { Id = step.Id, Order = step.Order, Title = step.Title, Status = step.Status, RetryLimit = step.RetryLimit, Attempts = step.Attempts.ToList() };
+    private static ProjectPlanStep CloneStep(ProjectPlanStep step) => new() { Id = step.Id, Order = step.Order, Title = step.Title, IsActive = step.IsActive, Status = step.Status, RetryLimit = step.RetryLimit, Attempts = step.Attempts.ToList() };
+}
+
+public sealed record PlanStepMutationResult(bool Success, string Message)
+{
+    public static PlanStepMutationResult Ok(string message) => new(true, message);
+    public static PlanStepMutationResult Fail(string message) => new(false, message);
 }

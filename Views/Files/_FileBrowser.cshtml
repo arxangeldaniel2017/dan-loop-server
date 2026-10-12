@@ -9,10 +9,11 @@
 }
 <div class="file-commandbar" data-file-manager data-current-path="@Model.Path">
     <details class="file-actions-panel">
-        <summary>＋ Upload files or create folder</summary>
+        <summary>＋ Upload files, create folder, or create text file</summary>
         <div class="file-toolbar">
             <form asp-action="Upload" method="post" enctype="multipart/form-data" data-file-ajax-form><input type="hidden" name="projectId" value="@Model.Project.Id"/><input type="hidden" name="path" value="@Model.Path"/><label>Upload files<input type="file" name="files" multiple required /></label><button>Upload</button></form>
             <form asp-action="CreateFolder" method="post" data-file-ajax-form><input type="hidden" name="projectId" value="@Model.Project.Id"/><input type="hidden" name="path" value="@Model.Path"/><label>New folder<input name="name" required maxlength="100" /></label><button class="secondary">Create folder</button></form>
+            <form asp-action="CreateTextFile" method="post" data-file-ajax-form><input type="hidden" name="projectId" value="@Model.Project.Id"/><input type="hidden" name="path" value="@Model.Path"/><label>Full file name<input name="name" required maxlength="255" placeholder="notes.txt, data.json, config.xml…" /></label><button class="secondary">Create text file</button></form>
         </div>
     </details>
     <div class="explorer-topbar">
