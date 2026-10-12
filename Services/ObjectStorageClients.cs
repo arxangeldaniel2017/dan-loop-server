@@ -50,7 +50,7 @@ internal sealed class S3StorageClient(IAmazonS3 client, string bucket) : IObject
                 Prefix = prefix,
                 ContinuationToken = token
             }, cancellationToken);
-            result.AddRange(page.S3Objects.Select(item => new RemoteObject(item.Key, item.Size ?? 0)));
+            result.AddRange((page.S3Objects ?? []).Select(item => new RemoteObject(item.Key, item.Size ?? 0)));
             token = page.IsTruncated == true ? page.NextContinuationToken : null;
         } while (token is not null);
         return result;

@@ -127,6 +127,8 @@
 
 <section id="connections" class="panel tab-panel" data-disclosure-scope data-connection-workspace="dashboard">
     <div class="section-title"><div><p class="eyebrow">SERVICES & MODEL ROUTING</p><h2>Connections</h2><p class="muted">Models are tried by capability and priority. If one fails, the same job continues with the next eligible connection.</p></div><div class="export-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".connection-card,.github-card">Expand all</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".connection-card,.github-card">Collapse all</button><a class="button secondary" asp-controller="Export" asp-action="Models">Export CSV</a></div></div>
+    <section class="connection-service-card connection-service-ai" data-connection-section="ai">
+    <div class="section-title connection-service-heading"><div><p class="eyebrow">PRIMARY CONNECTIONS</p><h2>AI providers</h2></div><span class="pill">@Model.State.Models.Count added</span></div>
     <details class="create-box connection-creator"><summary>＋ Add connection</summary>
         <form asp-controller="Manage" asp-action="CreateModel" method="post" class="form-grid" data-ai-connection-form>
             <label>Connection type<select name="providerId" data-ai-provider data-icon-select>@foreach (var provider in Model.State.AiProviderCatalog) { <option value="@provider.Id" data-base-url="@provider.BaseUrl">@provider.Name</option> }</select></label>
@@ -147,7 +149,7 @@
     @foreach (var m in Model.State.Models.OrderBy(item => item.Priority).ThenBy(item => item.Name))
     {
         var provider = Model.State.AiProviderCatalog.FirstOrDefault(item => item.Id == m.ProviderId);
-        <details class="connection-card @(m.IsEnabled ? "active" : "inactive")">
+        <details class="connection-card @(m.IsEnabled ? "active" : "inactive")" data-connection-key="ai-@m.Id">
             <summary><label class="connection-select"><input form="bulk-ai-connections" type="checkbox" name="selectedIds" value="@m.Id" aria-label="Select @m.Name" /></label><span class="status @(m.IsEnabled ? "online" : "")"></span><div><h3>@m.Name</h3><p>@(provider?.Name ?? m.ProviderId) · <code>@m.ModelId</code> · priority @m.Priority</p></div><span class="pill">@(m.IsEnabled ? "active" : "inactive")</span></summary>
             <div class="capability-row" aria-label="Capabilities for @m.Name">
                 @foreach (var capability in m.SuggestedCapabilities.Count > 0 ? m.SuggestedCapabilities.AsEnumerable() : AiCapabilities.All.AsEnumerable())
@@ -161,7 +163,8 @@
         </details>
     }
     </div>
-    <section class="connection-subsection">
+    </section>
+    <section class="connection-subsection connection-service-card connection-service-storage" data-connection-section="storage">
         <div class="section-title"><div><p class="eyebrow">OBJECT STORAGE</p><h2>Cloud object storage</h2><p class="muted">Mirror every project through S3-compatible storage, Google Cloud Storage, Azure Blob Storage, or Bunny Storage.</p></div><span class="pill">@(Model.State.ObjectStorageConnections.Any(item => item.IsEnabled) ? "active" : "local fallback")</span></div>
         <details class="create-box connection-creator"><summary>＋ Add object-storage connection</summary>
             <form asp-controller="Manage" asp-action="CreateStorageConnection" method="post" class="form-grid" data-storage-connection-form>
@@ -183,7 +186,7 @@
         <div class="connection-list">
         @foreach (var storage in Model.State.ObjectStorageConnections.OrderByDescending(item => item.IsEnabled).ThenBy(item => item.Name))
         {
-            <details class="connection-card @(storage.IsEnabled ? "active" : "inactive")">
+            <details class="connection-card @(storage.IsEnabled ? "active" : "inactive")" data-connection-key="storage-@storage.Id">
                 <summary><label class="connection-select"><input form="bulk-storage-connections" type="checkbox" name="selectedIds" value="@storage.Id" aria-label="Select @storage.Name" /></label><span class="status @(storage.IsEnabled ? "online" : "")"></span><div><h3>@storage.Name</h3><p>@storage.Provider · <code>@storage.Bucket</code></p></div><span class="pill">@(storage.IsEnabled ? "active" : "inactive")</span></summary>
                 <div class="connection-meta"><span>@(string.IsNullOrWhiteSpace(storage.Endpoint) ? $"AWS · {storage.Region}" : storage.Endpoint)</span><span>Prefix: @storage.Prefix</span><span>Test: @storage.LastTestStatus@(storage.LastTestedAt is null ? "" : $" · {storage.LastTestedAt.Value.ToLocalTime():g}")</span>@if (!string.IsNullOrWhiteSpace(storage.LastTestMessage)) { <small>@storage.LastTestMessage</small> }</div>
                 <div class="actions"><form asp-controller="Manage" asp-action="TestStorageConnection" method="post"><input type="hidden" name="id" value="@storage.Id"/><button class="secondary">Test connection</button></form><form asp-controller="Manage" asp-action="ToggleStorageConnection" method="post"><input type="hidden" name="id" value="@storage.Id"/><button class="secondary">@(storage.IsEnabled ? "Deactivate" : "Activate")</button></form><details><summary>Edit</summary><form asp-controller="Manage" asp-action="UpdateStorageConnection" method="post" class="form-grid compact" data-storage-connection-form><input type="hidden" name="id" value="@storage.Id"/><label>Provider<select name="provider" data-storage-provider data-icon-select>@foreach (var provider in ObjectStorageProviders.All) { <option value="@provider" selected="@(provider == storage.Provider)" data-default-region="@ObjectStorageProviders.DefaultRegion(provider)" data-endpoint-required="@ObjectStorageProviders.EndpointIsRequired(provider).ToString().ToLowerInvariant()" data-kind="@(ObjectStorageProviders.IsAzure(provider) ? "azure" : ObjectStorageProviders.IsBunny(provider) ? "bunny" : "s3")" data-session="@ObjectStorageProviders.SupportsSessionToken(provider).ToString().ToLowerInvariant()" data-force-path="@ObjectStorageProviders.DefaultForcePathStyle(provider).ToString().ToLowerInvariant()" data-docs="@ObjectStorageProviders.DocumentationUrl(provider)">@provider</option> }</select></label><label>Name<input name="name" value="@storage.Name" required /></label><label><span data-storage-container-label>Bucket</span><input name="bucket" value="@storage.Bucket" required /></label><label data-storage-region>Region<input name="region" value="@storage.Region" /></label><label class="wide" data-storage-endpoint>Endpoint<input name="endpoint" type="url" value="@storage.Endpoint" /></label><label class="wide">Folder prefix<input name="prefix" value="@storage.Prefix" /></label><label><span data-storage-access-label>New access key</span><input name="accessKey" type="password" placeholder="Keep current" /></label><label data-storage-secret><span data-storage-secret-label>New secret key</span><input name="secretKey" type="password" placeholder="Keep current" /></label><label data-storage-session>New session token<input name="sessionToken" type="password" placeholder="Keep current" /></label><label class="check" data-storage-path-style><input type="checkbox" name="forcePathStyle" value="true" checked="@storage.ForcePathStyle" /> Force path-style URLs</label><div class="wide provider-links" data-storage-links></div><button>Save</button></form></details><form asp-controller="Manage" asp-action="DeleteStorageConnection" method="post" onsubmit="return confirm('Delete this storage connection? Files already stored remotely will not be deleted.')"><input type="hidden" name="id" value="@storage.Id"/><button class="link-danger">Delete</button></form></div>
@@ -192,7 +195,7 @@
         </div>
         @if (!Model.State.ObjectStorageConnections.Any()) { <div class="empty">No object-storage connection yet. Project files remain safely available in local storage.</div> }
     </section>
-    <div class="connection-subsection">
+    <section class="connection-subsection connection-service-card connection-service-git" data-connection-section="git">
     <div class="section-title"><div><p class="eyebrow">SOURCE CONTROL & AUTOMATION</p><h2>Git provider connections</h2></div><a class="button secondary" asp-controller="Export" asp-action="GitHub">Export CSV</a></div>
     <details class="create-box"><summary>＋ Connect a Git provider</summary>
         <form asp-controller="GitHub" asp-action="ConnectToken" method="post" class="form-grid compact">
@@ -216,7 +219,7 @@
     }
     @foreach (var connection in Model.State.GitHubConnections)
     {
-        <details class="github-card" open="@(!Model.State.Projects.Any())">
+        <details class="github-card" open="@(!Model.State.Projects.Any())" data-connection-key="git-@connection.Id">
             <summary class="project-head"><div><h3>@connection.AccountLogin</h3><p>@connection.AuthenticationType authentication · @connection.AccountType · @connection.Repositories.Count repositories · refreshed @connection.RefreshedAt.ToLocalTime().ToString("g")</p></div><span class="pill">@connection.Provider connected</span></summary>
             <div class="actions">@if (!string.IsNullOrWhiteSpace(connection.SettingsUrl)) { <a class="button secondary" href="@connection.SettingsUrl">Manage on @connection.Provider</a> }<form asp-controller="GitHub" asp-action="Refresh" method="post"><input type="hidden" name="id" value="@connection.Id"/><button class="secondary">Refresh</button></form><form asp-controller="GitHub" asp-action="Delete" method="post" onsubmit="return confirm('Remove this Git provider connection from the server?')"><input type="hidden" name="id" value="@connection.Id"/><button class="link-danger">Remove</button></form></div>
             @if (!Model.State.Projects.Any())
@@ -247,7 +250,7 @@
         var choices = Model.State.GitHubConnections.SelectMany(x => x.Repositories).Where(x => mapped.Contains(x.Id)).ToList();
         <form asp-controller="GitHub" asp-action="SetResultsRepository" method="post" class="create-box form-grid"><input type="hidden" name="projectId" value="@project.Id"/><label>@project.Name result destination<select name="repositoryId"><option value="">Local project results folder</option>@foreach (var repository in choices) { <option value="@repository.Id" selected="@(project.ResultsRepositoryId == repository.Id)">@repository.FullName</option> }</select></label><button>Save destination</button></form>
     }
-    </div>
+    </section>
 </section>
 
 <section id="access" class="panel tab-panel" data-disclosure-scope>

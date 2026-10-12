@@ -135,7 +135,6 @@ public sealed class S3ObjectStorage : IAsyncDisposable
         if (endpoint is not null)
         {
             config.ServiceURL = NormalizeEndpoint(endpoint);
-            config.RegionEndpoint = null;
             // Many S3-compatible services do not implement the SDK's optional modern
             // checksum extensions. SigV4 still protects these requests and responses.
             config.RequestChecksumCalculation = RequestChecksumCalculation.WHEN_REQUIRED;

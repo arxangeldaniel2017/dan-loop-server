@@ -467,12 +467,30 @@ document.addEventListener('submit', async event => {
     }
     if (!nextWorkspace) throw new Error('The updated connection details could not be loaded.');
     const notice = nextDocument.querySelector('[data-auto-dismiss-notice] span')?.textContent?.trim();
-    workspace.replaceChildren(...nextWorkspace.childNodes);
-    initializeConnectionUi(workspace);
+    const sectionName = form.closest('[data-connection-section]')?.dataset.connectionSection;
+    const currentSection = sectionName ? workspace.querySelector(`[data-connection-section="${CSS.escape(sectionName)}"]`) : null;
+    const nextSection = sectionName ? nextWorkspace.querySelector(`[data-connection-section="${CSS.escape(sectionName)}"]`) : null;
+    const openConnectionKeys = currentSection
+      ? [...currentSection.querySelectorAll('details[open][data-connection-key]')].map(details => details.dataset.connectionKey)
+      : [];
+    let noticeHost = workspace;
+    if (currentSection && nextSection) {
+      openConnectionKeys.forEach(key => {
+        const details = nextSection.querySelector(`[data-connection-key="${CSS.escape(key)}"]`);
+        if (details) details.open = true;
+      });
+      currentSection.replaceWith(nextSection);
+      noticeHost = nextSection;
+      initializeConnectionUi(nextSection);
+    } else {
+      workspace.replaceChildren(...nextWorkspace.childNodes);
+      initializeConnectionUi(workspace);
+    }
     if (notice) {
       const status = document.createElement('div');
-      status.className = 'notice connection-ajax-notice'; status.setAttribute('role', 'status'); status.textContent = notice;
-      workspace.prepend(status);
+      const failed = /\b(failed|could not|invalid|required|unknown)\b/i.test(notice);
+      status.className = `${failed ? 'error' : 'notice'} connection-ajax-notice`; status.setAttribute('role', failed ? 'alert' : 'status'); status.textContent = notice;
+      noticeHost.prepend(status);
       setTimeout(() => status.remove(), 7000);
     }
   } catch (error) {
