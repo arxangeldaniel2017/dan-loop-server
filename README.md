@@ -8,7 +8,7 @@ Local, Docker-first ASP.NET Core control plane for projects, prompts, recurring 
 docker compose up --build
 ```
 
-Open <http://localhost:8080>. On first visit, create the administrator account, then optionally configure a model and create a project in the setup wizard. Application state, encryption keys and encrypted remote-model credentials persist in the `dan-loop-data` Docker volume.
+Open <http://localhost:8080>. On first visit, create the required administrator account, then optionally create a project and configure connections. Both optional steps can be skipped and completed later. Application state, encryption keys and encrypted remote-model credentials persist in the `dan-loop-data` Docker volume.
 
 When no managed database is configured, the server automatically creates a local SQLite database at `data/dan-loop.db` (or `/data/dan-loop.db` in Docker). Existing `state.json` data is imported automatically when the database is first created.
 

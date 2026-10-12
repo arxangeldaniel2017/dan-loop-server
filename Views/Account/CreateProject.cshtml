@@ -1,13 +1,14 @@
 @{ ViewData["Title"] = "Create project"; }
 <div class="auth-wrap"><section class="auth-card wizard-card">
-    <p class="eyebrow">FIRST RUN · STEP 2 OF 3</p>
+    <p class="eyebrow">FIRST RUN · STEP 2 OF 3 · OPTIONAL</p>
     <h1>Create a project.</h1>
-    <p>Start with the workspace that will hold your loops, jobs, files, and connection defaults.</p>
+    <p>Create a workspace for your loops, jobs, files, and connection defaults, or skip this and create one later.</p>
     <div asp-validation-summary="All" class="error"></div>
     <form method="post">
         <label>Name<input name="name" value="@(Context.Request.HasFormContentType ? Context.Request.Form["name"] : "My Project")" required maxlength="100" autofocus /></label>
         <label>Description<input name="description" value="@(Context.Request.HasFormContentType ? Context.Request.Form["description"] : "")" maxlength="500" /></label>
         <label>Project system prompt<textarea name="systemPrompt" rows="4" placeholder="Instructions applied to every job in this project">@(Context.Request.HasFormContentType ? Context.Request.Form["systemPrompt"] : "")</textarea></label>
         <button>Create project and continue →</button>
+        <a class="button secondary" asp-action="Connections">Skip project creation</a>
     </form>
 </section></div>
