@@ -43,6 +43,19 @@ To also permanently erase local server data:
 docker compose down -v
 ```
 
+## Sign-in security
+
+The sign-in and first-run administrator forms use ASP.NET Core anti-forgery tokens. Login requests are limited to 12 per minute per source IP, repeated failures receive a progressive delay, and an account is temporarily locked for 15 minutes after 8 failed attempts. Errors remain deliberately generic so the form does not reveal whether an account exists. Administrators can clear a temporary lock from **Users**.
+
+Cloudflare Turnstile is optional and appears adaptively after 3 suspicious failures. Configure both values to enable it:
+
+- `Security__Turnstile__SiteKey`
+- `Security__Turnstile__SecretKey`
+
+Authentication cookies are HTTP-only and SameSite, are secure-only outside development, and expire after 12 hours. Passwords use salted PBKDF2-SHA256 with 210,000 iterations and fixed-time verification. Production responses enable HSTS, HTTPS redirection, clickjacking protection, MIME-sniffing protection, a same-origin referrer policy, and a restrictive browser permissions policy. Failed and successful sign-ins are recorded in server logs without logging passwords or submitted credentials.
+
+For a public deployment, keep the application controls enabled and also configure request limiting at the hosting platform or reverse proxy. Edge limiting rejects abusive traffic before it consumes application resources; the in-application limiter protects requests that reach the server.
+
 ## Remote models
 
 The server loads its provider/model defaults from `Data/ai-connections.json` and copies the catalog into SQLite or the configured managed database at startup. Add or update catalog entries in that JSON file when providers change; saved user connections and capability choices remain separate.

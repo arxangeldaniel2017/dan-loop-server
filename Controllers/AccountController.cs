@@ -5,21 +5,25 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace DanLoopServer.Controllers;
 
-public sealed class AccountController(StateStore store, PasswordService passwords, RemoteModelClient modelClient) : Controller
+public sealed class AccountController(StateStore store, PasswordService passwords, RemoteModelClient modelClient,
+    LoginSecurityService loginSecurity, TurnstileService turnstile, ILogger<AccountController> logger) : Controller
 {
-    [AllowAnonymous, HttpGet]
+    [AllowAnonymous, HttpGet, ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public IActionResult Setup() => store.IsSetup ? RedirectToAction(nameof(Login)) : View();
 
-    [AllowAnonymous, HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> Setup(string username, string password, string confirmPassword)
+    [AllowAnonymous, HttpPost, ValidateAntiForgeryToken, EnableRateLimiting("login"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> Setup(string? username, string? password, string? confirmPassword)
     {
         if (store.IsSetup) return RedirectToAction(nameof(Login));
-        username = username.Trim();
+        username = username?.Trim() ?? "";
+        password ??= "";
+        confirmPassword ??= "";
         if (username.Length is < 3 or > 64) ModelState.AddModelError("", "Username must be 3–64 characters.");
-        if (password.Length < 10) ModelState.AddModelError("", "Password must be at least 10 characters.");
+        if (password.Length is < 10 or > 1024) ModelState.AddModelError("", "Password must be 10–1,024 characters.");
         if (password != confirmPassword) ModelState.AddModelError("", "Passwords do not match.");
         if (!ModelState.IsValid) return View();
         var user = await store.UpdateAsync(state =>
@@ -140,24 +144,75 @@ public sealed class AccountController(StateStore store, PasswordService password
         ViewBag.ObjectStorageConnections = options.StorageConnections;
     }
 
-    [AllowAnonymous, HttpGet]
+    [AllowAnonymous, HttpGet, ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public IActionResult Login(string? returnUrl = null)
     {
         if (!store.IsSetup) return RedirectToAction(nameof(Setup));
-        ViewBag.ReturnUrl = returnUrl;
-        return View();
+        return LoginView(returnUrl);
     }
 
-    [AllowAnonymous, HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> Login(string username, string password, string? returnUrl = null)
+    [AllowAnonymous, HttpPost, ValidateAntiForgeryToken, EnableRateLimiting("login"), ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> Login(string? username, string? password, string? returnUrl = null,
+        [FromForm(Name = "cf-turnstile-response")] string? turnstileToken = null, CancellationToken cancellationToken = default)
     {
-        var user = await store.ReadAsync(state => state.Users.FirstOrDefault(x =>
-            x.IsEnabled && string.Equals(x.Username, username.Trim(), StringComparison.OrdinalIgnoreCase)));
-        if (user is null || !passwords.Verify(password, user.PasswordHash))
+        username = username?.Trim() ?? "";
+        password ??= "";
+        var ipAddress = ClientIpAddress();
+        if (username.Length > 64 || password.Length > 1024)
         {
-            ModelState.AddModelError("", "Invalid username or password.");
-            return View();
+            var invalidFailures = loginSecurity.RegisterFailure(ipAddress, username[..Math.Min(username.Length, 64)]);
+            await loginSecurity.ApplyProgressiveDelayAsync(invalidFailures, cancellationToken);
+            ModelState.AddModelError("", "Sign-in could not be completed. Check your details and try again.");
+            return LoginView(returnUrl);
         }
+        if (turnstile.IsConfigured && loginSecurity.ShouldChallenge(ipAddress, username) &&
+            !await turnstile.VerifyAsync(turnstileToken, ipAddress, cancellationToken))
+        {
+            var challengeFailures = loginSecurity.RegisterFailure(ipAddress, username);
+            logger.LogWarning("Rejected login challenge from {IpAddress}", ipAddress);
+            await loginSecurity.ApplyProgressiveDelayAsync(challengeFailures, cancellationToken);
+            ModelState.AddModelError("", "Sign-in could not be completed. Check your details and try again.");
+            return LoginView(returnUrl, username);
+        }
+
+        var user = await store.ReadAsync(state => state.Users.FirstOrDefault(x =>
+            x.IsEnabled && string.Equals(x.Username, username, StringComparison.OrdinalIgnoreCase)));
+        var now = DateTimeOffset.UtcNow;
+        var isLocked = user?.LockoutEnd is DateTimeOffset lockoutEnd && lockoutEnd > now;
+        var passwordMatches = passwords.Verify(password, user?.PasswordHash ?? loginSecurity.DummyPasswordHash);
+        if (user is null || isLocked || !passwordMatches)
+        {
+            var newlyLocked = await store.UpdateAsync(state =>
+            {
+                var candidate = state.Users.FirstOrDefault(item => item.Id == user?.Id);
+                if (candidate is null || isLocked) return false;
+                if (candidate.LockoutEnd is DateTimeOffset expired && expired <= now)
+                {
+                    candidate.LockoutEnd = null;
+                    candidate.AccessFailedCount = 0;
+                }
+                candidate.AccessFailedCount++;
+                if (candidate.AccessFailedCount < LoginSecurityService.AccountLockoutThreshold) return false;
+                candidate.LockoutEnd = now.Add(LoginSecurityService.AccountLockoutDuration);
+                state.Messages.Add(new AppMessage { Level = MessageLevels.Warning, Text = "An account was temporarily locked after repeated failed sign-in attempts." });
+                return true;
+            });
+            var failures = loginSecurity.RegisterFailure(ipAddress, username);
+            logger.LogWarning("Failed login attempt from {IpAddress}; account lock triggered: {NewlyLocked}", ipAddress, newlyLocked);
+            await loginSecurity.ApplyProgressiveDelayAsync(failures, cancellationToken);
+            ModelState.AddModelError("", "Sign-in could not be completed. Check your details and try again.");
+            return LoginView(returnUrl, username);
+        }
+
+        await store.UpdateAsync(state =>
+        {
+            var current = state.Users.First(item => item.Id == user.Id);
+            current.AccessFailedCount = 0;
+            current.LockoutEnd = null;
+            return true;
+        });
+        loginSecurity.RegisterSuccess(ipAddress, username);
+        logger.LogInformation("Successful login from {IpAddress}", ipAddress);
         await SignInAsync(user);
         return LocalRedirect(Url.IsLocalUrl(returnUrl) ? returnUrl! : "/");
     }
@@ -171,6 +226,16 @@ public sealed class AccountController(StateStore store, PasswordService password
 
     [AllowAnonymous]
     public IActionResult Denied() => View();
+
+    private IActionResult LoginView(string? returnUrl, string? username = null)
+    {
+        ViewBag.ReturnUrl = returnUrl;
+        ViewBag.RequireTurnstile = turnstile.IsConfigured && loginSecurity.ShouldChallenge(ClientIpAddress(), username);
+        ViewBag.TurnstileSiteKey = turnstile.SiteKey;
+        return View(nameof(Login));
+    }
+
+    private string ClientIpAddress() => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
     private Task SignInAsync(AppUser user)
     {

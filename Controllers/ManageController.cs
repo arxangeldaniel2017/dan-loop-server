@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace DanLoopServer.Controllers;
 
 [Authorize]
-public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, AiModelDiscoveryService modelDiscovery, WorkspaceService workspace, GitProviderService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations, S3ObjectStorage objectStorage) : Controller
+public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, AiModelDiscoveryService modelDiscovery, WorkspaceService workspace, GitProviderService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations, S3ObjectStorage objectStorage, LoginSecurityService loginSecurity) : Controller
 {
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId)
@@ -508,7 +508,12 @@ public sealed class ManageController(StateStore store, PasswordService passwords
             if (user.Role == Roles.Admin && nextRole != Roles.Admin && state.Users.Count(item => item.Role == Roles.Admin) <= 1)
                 return "The final administrator cannot be changed to a member.";
             user.Role = nextRole;
-            if (!string.IsNullOrEmpty(password)) user.PasswordHash = passwords.Hash(password);
+            if (!string.IsNullOrEmpty(password))
+            {
+                user.PasswordHash = passwords.Hash(password);
+                user.AccessFailedCount = 0;
+                user.LockoutEnd = null;
+            }
             return "User updated.";
         });
         return Users(result);
@@ -536,8 +541,24 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     public async Task<IActionResult> ToggleUser(Guid id)
     {
         if (id == CurrentUserId()) return Users("You cannot disable your own account.");
-        await store.UpdateAsync(state => { var user = state.Users.First(x => x.Id == id); user.IsEnabled = !user.IsEnabled; return true; });
+        await store.UpdateAsync(state => { var user = state.Users.First(x => x.Id == id); user.IsEnabled = !user.IsEnabled; if (user.IsEnabled) { user.AccessFailedCount = 0; user.LockoutEnd = null; } return true; });
         return Users("User status changed.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> UnlockUser(Guid id)
+    {
+        var username = await store.UpdateAsync(state =>
+        {
+            var user = state.Users.FirstOrDefault(item => item.Id == id);
+            if (user is null) return null;
+            user.AccessFailedCount = 0;
+            user.LockoutEnd = null;
+            return user.Username;
+        });
+        if (username is null) return Users("User was not found.");
+        loginSecurity.ClearUser(username);
+        return Users("User sign-in lock was cleared.");
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]

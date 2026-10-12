@@ -83,7 +83,21 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/home/error");
     app.UseHsts();
+    app.UseHttpsRedirection();
 }
+
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers.XContentTypeOptions = "nosniff";
+        context.Response.Headers.XFrameOptions = "DENY";
+        context.Response.Headers["Referrer-Policy"] = "same-origin";
+        context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=(), usb=()";
+        return Task.CompletedTask;
+    });
+    await next();
+});
 
 app.UseStaticFiles();
 app.UseRouting();

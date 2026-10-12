@@ -2,13 +2,14 @@ using System.Collections.Concurrent;
 
 namespace DanLoopServer.Services;
 
-public sealed class LoginSecurityService
+public sealed class LoginSecurityService(PasswordService passwords)
 {
     public const int ChallengeThreshold = 3;
     public const int AccountLockoutThreshold = 8;
     public static readonly TimeSpan AccountLockoutDuration = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan TrackingWindow = TimeSpan.FromMinutes(30);
     private readonly ConcurrentDictionary<string, AttemptState> _attempts = new(StringComparer.OrdinalIgnoreCase);
+    public string DummyPasswordHash { get; } = passwords.Hash(Convert.ToBase64String(Guid.NewGuid().ToByteArray()));
 
     public bool ShouldChallenge(string ipAddress, string? username = null) =>
         Count(Key("ip", ipAddress)) >= ChallengeThreshold ||
@@ -26,6 +27,9 @@ public sealed class LoginSecurityService
         _attempts.TryRemove(Key("ip", ipAddress), out _);
         _attempts.TryRemove(Key("user", Normalize(username)), out _);
     }
+
+    public void ClearUser(string username) =>
+        _attempts.TryRemove(Key("user", Normalize(username)), out _);
 
     public Task ApplyProgressiveDelayAsync(int failures, CancellationToken cancellationToken)
     {
