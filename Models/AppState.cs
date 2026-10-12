@@ -1,8 +1,10 @@
+using System.Text.Json.Serialization;
+
 namespace DanLoopServer.Models;
 
 public sealed class AppState
 {
-    public int Version { get; set; } = 22;
+    public int Version { get; set; } = 23;
     public List<AppUser> Users { get; set; } = [];
     public List<Project> Projects { get; set; } = [];
     public List<LoopDefinition> Loops { get; set; } = [];
@@ -118,7 +120,9 @@ public sealed class ProjectExecutionPlan
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectId { get; set; }
-    public string LastMarkdown { get; set; } = "";
+    public Guid? LoopId { get; set; }
+    [JsonPropertyName("lastMarkdown")]
+    public string PlanningOutput { get; set; } = "";
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ProjectPlanStep> Steps { get; set; } = [];

@@ -264,6 +264,23 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                         step.IsActive = true;
                     _state.Version = 22;
                 }
+                if (_state.Version < 23)
+                {
+                    foreach (var plan in _state.ExecutionPlans.Where(plan => plan.LoopId is null))
+                    {
+                        var attemptedLoopIds = plan.Steps.SelectMany(step => step.Attempts)
+                            .Join(_state.Jobs, attempt => attempt.JobId, job => job.Id, (_, job) => job.LoopId)
+                            .Where(loopId => loopId is not null).Select(loopId => loopId!.Value).Distinct().ToList();
+                        if (attemptedLoopIds.Count == 1)
+                        {
+                            plan.LoopId = attemptedLoopIds[0];
+                            continue;
+                        }
+                        var enabledLoops = _state.Loops.Where(loop => loop.ProjectId == plan.ProjectId && loop.IsEnabled).ToList();
+                        if (enabledLoops.Count == 1) plan.LoopId = enabledLoops[0].Id;
+                    }
+                    _state.Version = 23;
+                }
                 await SaveUnsafeAsync();
                 return;
             }

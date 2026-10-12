@@ -4,18 +4,15 @@ using DanLoopServer.Models;
 
 namespace DanLoopServer.Services;
 
-public sealed class AgentRuntimeService(AgentRuntimeClient client, AgentToolExecutor tools, StateStore store, WorkspaceService workspace)
+public sealed class AgentRuntimeService(AgentRuntimeClient client, AgentToolExecutor tools, StateStore store)
 {
     public async Task<AgentRuntimeResult> RunAsync(RemoteModel model, Project project, Job job, IReadOnlyList<ConversationMessage> conversation, string currentPrompt, IReadOnlyList<string> imageDataUrls, AgentRuntimeSettings settings, CancellationToken cancellationToken)
     {
-        var root = await workspace.ResolveProjectPathAsync(project.Id, "");
-        var planExisted = File.Exists(Path.Combine(root, "PLAN.md"));
-        var planContent = planExisted ? Limit(await File.ReadAllTextAsync(Path.Combine(root, "PLAN.md"), cancellationToken), 12_000) : "";
         // AI changes are queued by the file tools and published in efficient background batches.
         // A model run must not wait for GitHub network activity in order to finish.
         var requirePublishing = false;
         var workspaceGuide = await tools.CreateWorkspaceGuideAsync(project.Id, settings);
-        var messages = BuildMessages(project, job, conversation, currentPrompt, imageDataUrls, workspaceGuide, planExisted, planContent, requirePublishing);
+        var messages = BuildMessages(project, job, conversation, currentPrompt, imageDataUrls, workspaceGuide, requirePublishing);
         var toolCallCount = 0;
         var changedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var unpublishedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -24,7 +21,7 @@ public sealed class AgentRuntimeService(AgentRuntimeClient client, AgentToolExec
         var maximumSteps = Math.Clamp(settings.MaxSteps, 1, 50);
         for (var stepNumber = 1; stepNumber <= maximumSteps; stepNumber++)
         {
-            var policy = ToolPolicy(planExisted, changedPaths, unpublishedPaths, requirePublishing, forceImplementationAction, stepNumber);
+            var policy = ToolPolicy(changedPaths, unpublishedPaths, requirePublishing, forceImplementationAction, stepNumber);
             var useFileGenerationBudget = IsFileMutationTool(policy.Required) ||
                                           policy.RequireAny && policy.Allowed?.Any(IsFileMutationTool) == true;
             var step = await client.CompleteStepAsync(model, messages, settings, cancellationToken, policy.Allowed, policy.Required, policy.RequireAny, policy.Stream, useFileGenerationBudget);
@@ -47,7 +44,7 @@ public sealed class AgentRuntimeService(AgentRuntimeClient client, AgentToolExec
                 var final = !string.IsNullOrWhiteSpace(step.Content) ? step.Content : step.Reasoning;
                 if (string.IsNullOrWhiteSpace(final)) throw new InvalidOperationException("The model returned no final content.");
                 await RecordAiResponseAsync(job.Id, stepNumber, "Response", final);
-                var validation = ValidateCompletion(planExisted, changedPaths, unpublishedPaths, requirePublishing);
+                var validation = ValidateCompletion(changedPaths, unpublishedPaths, requirePublishing);
                 if (validation.Error is null)
                     return new AgentRuntimeResult
                     {
@@ -58,7 +55,7 @@ public sealed class AgentRuntimeService(AgentRuntimeClient client, AgentToolExec
                     throw new InvalidOperationException($"The model did not complete the required project action: {validation.Error}");
 
                 messages.Add(new { role = "assistant", content = Limit(final, 2000) });
-                messages.Add(new { role = "user", content = CorrectiveInstruction(validation.Error, planExisted, requirePublishing, unpublishedPaths) });
+                messages.Add(new { role = "user", content = CorrectiveInstruction(validation.Error, requirePublishing, unpublishedPaths) });
                 forceImplementationAction = true;
                 continue;
             }
@@ -81,7 +78,9 @@ public sealed class AgentRuntimeService(AgentRuntimeClient client, AgentToolExec
             foreach (var call in calls)
             {
                 var auditId = await StartAuditAsync(project.Id, job.Id, stepNumber, call);
-                var result = await tools.ExecuteAsync(project.Id, call, settings, cancellationToken);
+                var result = IsWorkflowMarkdownMutation(call)
+                    ? new AgentToolResult { Success = false, Summary = "Blocked workflow-file mutation", Output = "Loop steps are stored in server state. Do not create or modify PLAN.md, plan-vN.md, STEPS.md, or similar workflow-tracking Markdown files. Change only files required to implement the assigned step." }
+                    : await tools.ExecuteAsync(project.Id, call, settings, cancellationToken);
                 await CompleteAuditAsync(auditId, result);
                 if (result.Success) TrackToolEffect(call, result, changedPaths, unpublishedPaths, ref publishUrl);
                 else if (call.Name.Equals("publish_project_files", StringComparison.OrdinalIgnoreCase))
@@ -93,26 +92,17 @@ public sealed class AgentRuntimeService(AgentRuntimeClient client, AgentToolExec
                 if (structured) messages.Add(new { role = "tool", tool_call_id = call.Id, content = result.Output });
                 else fallbackResults.Add($"TOOL {call.Name} ({(result.Success ? "success" : "failed")}):\n{result.Output}");
             }
-            if (!structured) messages.Add(new { role = "user", content = "Tool execution results:\n\n" + string.Join("\n\n", fallbackResults) + "\n\n" + ContinueInstruction(planExisted, requirePublishing) });
+            if (!structured) messages.Add(new { role = "user", content = "Tool execution results:\n\n" + string.Join("\n\n", fallbackResults) + "\n\n" + ContinueInstruction(requirePublishing) });
         }
         throw new InvalidOperationException($"Agent stopped after reaching the configured limit of {settings.MaxSteps} steps.");
     }
 
-    private static List<object> BuildMessages(Project project, Job job, IReadOnlyList<ConversationMessage> conversation, string currentPrompt, IReadOnlyList<string> imageDataUrls, string workspaceGuide, bool planExisted, string planContent, bool requirePublishing)
+    private static List<object> BuildMessages(Project project, Job job, IReadOnlyList<ConversationMessage> conversation, string currentPrompt, IReadOnlyList<string> imageDataUrls, string workspaceGuide, bool requirePublishing)
     {
-        var workflow = planExisted
-            ? $"""
+        var workflow = $"""
 
               WORKFLOW PHASE — IMPLEMENT ONE PLAN STEP:
-              A root PLAN.md already exists and its current content is included below. The server has assigned this step: {(string.IsNullOrWhiteSpace(job.PlanStepTitle) ? "the first eligible unchecked task" : job.PlanStepTitle)}. Implement only that server-assigned step now with write_file, replace_in_file, or generate_asset when a generated asset is required. Then update PLAN.md to mark the task complete and record the files changed. Do not merely discuss, redesign, or rewrite the plan. A successful run requires at least one meaningful source, test, configuration, documentation, or generated asset file plus an updated PLAN.md. Files under results, bin, obj, temporary folders, and files named placeholder do not count as implementation.{(requirePublishing ? " Publish every changed path together with publish_project_files before finishing." : " A Git provider is not connected, so keep the verified changes in the local project workspace and finish without publishing.")}
-
-              CURRENT PLAN.md:
-              {planContent}
-              """
-            : $"""
-
-              WORKFLOW PHASE — CREATE THE PROJECT PLAN:
-              PLAN.md does not exist. Your first action is to create a concise root PLAN.md with write_file. Include the project goal and 3–12 ordered, small, verifiable tasks using Markdown checkboxes. Do not attempt the entire project and do not emit a long design before calling the tool. This run is successfully planned only after PLAN.md is actually saved.{(requirePublishing ? " Publish PLAN.md with publish_project_files before finishing." : "")} The next loop run will implement its first unchecked task.
+              The server-managed loop steps are the only source of truth. The assigned step is: {job.PlanStepTitle}. Implement only this step. Do not create or modify PLAN.md, plan-vN.md, STEPS.md, checklists, progress reports, or any other workflow-tracking file. Do not spend tool calls maintaining planning state. Use file tools only for the actual implementation files required by this step. A successful run requires at least one meaningful source, test, configuration, documentation, or generated asset change. Files under results, bin, obj, temporary folders, workflow-tracking Markdown, and files named placeholder do not count as implementation.{(requirePublishing ? " Publish every changed path together with publish_project_files before finishing." : " A Git provider is not connected, so keep the verified changes in the local project workspace and finish without publishing.")}
               """;
         var system = project.SystemPrompt + """
 
@@ -142,16 +132,12 @@ CURRENT PROJECT GUIDE:
         return result;
     }
 
-    private static (IReadOnlySet<string>? Allowed, string? Required, bool RequireAny, bool? Stream) ToolPolicy(bool planExisted, HashSet<string> changedPaths, HashSet<string> unpublishedPaths, bool requirePublishing, bool forceImplementationAction, int stepNumber)
+    private static (IReadOnlySet<string>? Allowed, string? Required, bool RequireAny, bool? Stream) ToolPolicy(HashSet<string> changedPaths, HashSet<string> unpublishedPaths, bool requirePublishing, bool forceImplementationAction, int stepNumber)
     {
-        var planChanged = changedPaths.Contains("PLAN.md");
         var implementationChanged = changedPaths.Any(IsImplementationPath);
-        if (!planExisted && !planChanged)
-            return (new HashSet<string>(["write_file"], StringComparer.OrdinalIgnoreCase), "write_file", false, true);
-        // A plan is already available in the system prompt. Give the model two rounds to inspect
-        // existing project files, then require implementation instead of allowing an unbounded
-        // read/discuss loop over historical reports.
-        if (planExisted && (forceImplementationAction || stepNumber >= 3 || changedPaths.Count > 0) && (!implementationChanged || !planChanged))
+        // Give the model two rounds to inspect existing project files, then require an
+        // implementation mutation instead of allowing an unbounded read/discuss loop.
+        if ((forceImplementationAction || stepNumber >= 3 || changedPaths.Count > 0) && !implementationChanged)
             return (new HashSet<string>(["write_file", "replace_in_file", "generate_asset"], StringComparer.OrdinalIgnoreCase), null, true, true);
         if (requirePublishing && unpublishedPaths.Count > 0)
             return (new HashSet<string>(["publish_project_files"], StringComparer.OrdinalIgnoreCase), "publish_project_files", false, true);
@@ -168,29 +154,26 @@ CURRENT PROJECT GUIDE:
         catch (JsonException) { return false; }
     }
 
-    private static (string? Outcome, string? Error) ValidateCompletion(bool planExisted, HashSet<string> changedPaths, HashSet<string> unpublishedPaths, bool requirePublishing)
+    private static (string? Outcome, string? Error) ValidateCompletion(HashSet<string> changedPaths, HashSet<string> unpublishedPaths, bool requirePublishing)
     {
-        var planChanged = changedPaths.Contains("PLAN.md");
         var implementationChanged = changedPaths.Any(IsImplementationPath);
-        if (!planChanged)
-            return (null, planExisted ? "PLAN.md was not updated after the implementation work." : "PLAN.md was not created with write_file.");
-        if (planExisted && !implementationChanged)
-            return (null, "No implementation file was created or changed; only planning activity was performed.");
+        if (!implementationChanged)
+            return (null, "No implementation file was created or changed.");
         if (requirePublishing && unpublishedPaths.Count > 0)
             return (null, $"The following changed files were not published through the Git provider: {string.Join(", ", unpublishedPaths.OrderBy(path => path))}.");
-        return (planExisted || implementationChanged ? AgentRunOutcomes.ChangesCompleted : AgentRunOutcomes.PlanCreated, null);
+        return (AgentRunOutcomes.ChangesCompleted, null);
     }
 
-    private static string CorrectiveInstruction(string error, bool planExisted, bool requirePublishing, HashSet<string> unpublishedPaths)
+    private static string CorrectiveInstruction(string error, bool requirePublishing, HashSet<string> unpublishedPaths)
         => $"""
            Your previous response is not a valid completion: {error}
-           Do not provide another plan or explanation. {(planExisted ? "Use the file tools now to implement the first unchecked PLAN.md task, then update PLAN.md." : "Use write_file now to create a concise root PLAN.md with 3–12 small checkbox tasks.")}
+           Do not provide another plan or explanation. Use the file tools now only to implement the assigned server-managed step. Do not create or modify workflow or planning Markdown files.
            {(requirePublishing && unpublishedPaths.Count > 0 ? $"Publish all still-unpublished paths together: {string.Join(", ", unpublishedPaths.OrderBy(path => path))}." : "")}
            Only provide the final report after the required tool actions succeed.
            """;
 
-    private static string ContinueInstruction(bool planExisted, bool requirePublishing)
-        => $"Continue now. {(planExisted ? "Finish one PLAN.md task, change implementation files, and update PLAN.md." : "Create PLAN.md now.")} {(requirePublishing ? "Publish every changed path before the final response." : "")} Do not stop at planning prose.";
+    private static string ContinueInstruction(bool requirePublishing)
+        => $"Continue now. Implement the assigned server-managed step by changing only the required implementation files. Do not create or update planning files. {(requirePublishing ? "Publish every changed path before the final response." : "")} Do not stop at planning prose.";
 
     private static void TrackToolEffect(AgentToolCall call, AgentToolResult result, HashSet<string> changedPaths, HashSet<string> unpublishedPaths, ref string publishUrl)
     {
@@ -216,7 +199,25 @@ CURRENT PROJECT GUIDE:
         catch (JsonException) { /* The executor already reports malformed arguments. */ }
     }
 
-    private static bool IsPlan(string path) => NormalizePath(path).Equals("PLAN.md", StringComparison.OrdinalIgnoreCase);
+    private static bool IsWorkflowMarkdown(string path)
+    {
+        var name = Path.GetFileName(NormalizePath(path));
+        return Regex.IsMatch(name, @"^(?:(?:.*[-_.])?(?:plan|steps|checklist|progress|status|todo)(?:[-_.].*)?)\.md$", RegexOptions.IgnoreCase);
+    }
+
+    private static bool IsWorkflowMarkdownMutation(AgentToolCall call)
+    {
+        if (!call.Name.Equals("write_file", StringComparison.OrdinalIgnoreCase) &&
+            !call.Name.Equals("replace_in_file", StringComparison.OrdinalIgnoreCase) &&
+            !call.Name.Equals("generate_asset", StringComparison.OrdinalIgnoreCase)) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
+            return document.RootElement.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.String &&
+                   IsWorkflowMarkdown(path.GetString() ?? "");
+        }
+        catch (JsonException) { return false; }
+    }
     private static bool IsFileMutationTool(string? name) =>
         name is not null && (name.Equals("write_file", StringComparison.OrdinalIgnoreCase) ||
                              name.Equals("replace_in_file", StringComparison.OrdinalIgnoreCase) ||
@@ -225,7 +226,7 @@ CURRENT PROJECT GUIDE:
     private static bool IsImplementationPath(string path)
     {
         var normalized = NormalizePath(path);
-        if (IsPlan(normalized)) return false;
+        if (IsWorkflowMarkdown(normalized)) return false;
         var parts = normalized.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Any(part => part.Equals("results", StringComparison.OrdinalIgnoreCase) || part.Equals("bin", StringComparison.OrdinalIgnoreCase) || part.Equals("obj", StringComparison.OrdinalIgnoreCase) || part.Equals("tmp", StringComparison.OrdinalIgnoreCase) || part.Equals("temp", StringComparison.OrdinalIgnoreCase))) return false;
         return !Path.GetFileNameWithoutExtension(normalized).Equals("placeholder", StringComparison.OrdinalIgnoreCase);

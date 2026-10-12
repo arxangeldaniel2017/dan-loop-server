@@ -95,7 +95,7 @@
 </section>
 
 <section id="steps" class="panel tab-panel" data-disclosure-scope>
-    <div class="section-title"><div><p class="eyebrow">SERVER-MANAGED WORKFLOW</p><h2>Steps</h2><p class="muted">AI proposes the plan; the server owns step order, attempts, retries, and outcomes. PLAN.md is restored from this record if it is deleted.</p></div><div class="export-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".plan-board">Expand all</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".plan-board">Collapse all</button><a class="button secondary" asp-controller="Export" asp-action="Plans">Export CSV</a></div></div>
+    <div class="section-title"><div><p class="eyebrow">SERVER-MANAGED WORKFLOW</p><h2>Steps</h2><p class="muted">Each loop creates its plan once. The server locks that original step list, manages attempts and retries, and finishes the loop when its steps are terminal. Create a new loop to define more steps.</p></div><div class="export-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".plan-board">Expand all</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".plan-board">Collapse all</button><a class="button secondary" asp-controller="Export" asp-action="Plans">Export CSV</a></div></div>
     <div id="plan-steps-list" data-plan-steps-url="@Url.Action("PlanStepsPartial", "Home")" data-disclosure-scope>@await Html.PartialAsync("_PlanSteps", Model)</div>
 </section>
 

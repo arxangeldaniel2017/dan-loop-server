@@ -49,6 +49,18 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
             // A recurring loop owns one execution at a time. Slow work must not build an
             // ever-growing queue behind the active execution.
             if (state.Jobs.Any(job => job.LoopId == loop.Id && job.Status is JobStatuses.Queued or JobStatuses.Running)) continue;
+            var plan = state.ExecutionPlans.FirstOrDefault(item => item.LoopId == loop.Id);
+            if (plan is { Steps.Count: > 0 } && plan.Steps.All(step => step.Status is PlanStepStatuses.Succeeded or PlanStepStatuses.Skipped or PlanStepStatuses.Failed))
+            {
+                loop.IsEnabled = false;
+                var failed = plan.Steps.Count(step => step.Status == PlanStepStatuses.Failed);
+                var skipped = plan.Steps.Count(step => step.Status == PlanStepStatuses.Skipped);
+                var detail = failed > 0
+                    ? $"stopped after {failed} fixed plan step{(failed == 1 ? "" : "s")} exhausted the configured retries"
+                    : $"finished all {plan.Steps.Count} fixed plan steps{(skipped > 0 ? $" ({skipped} skipped)" : "")}";
+                state.Messages.Add(new AppMessage { ProjectId = loop.ProjectId, Level = failed > 0 ? MessageLevels.Warning : MessageLevels.Info, Text = $"Loop '{loop.Name}' {detail}. Create a new loop to define additional steps." });
+                continue;
+            }
             var project = state.Projects.FirstOrDefault(x => x.Id == loop.ProjectId);
             if (project is null || !state.Models.Any(model => model.IsEnabled)) continue;
             var nextAt = loop.LastQueuedAt?.AddSeconds(Math.Max(10, loop.IntervalSeconds)) ?? DateTimeOffset.MinValue;
@@ -82,9 +94,8 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
 
     private async Task RunAsync(Job job, CancellationToken cancellationToken, CancellationToken applicationStoppingToken, int timeoutMinutes)
     {
-        var projectRoot = await workspace.ResolveProjectPathAsync(job.ProjectId, "");
         var requiredCapability = string.IsNullOrWhiteSpace(job.RequiredCapability)
-            ? File.Exists(Path.Combine(projectRoot, "PLAN.md")) ? AiCapabilities.Coder : AiCapabilities.Planner
+            ? AiCapabilities.Orchestrator
             : job.RequiredCapability;
         var context = await store.ReadAsync(state =>
         {
@@ -113,7 +124,7 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
         await store.UpdateAsync(state => { var current = state.Jobs.First(item => item.Id == job.Id); current.ModelId = selectedModel.Id; current.RequiredCapability = requiredCapability; return true; });
         try
         {
-            var assignedStep = await plans.PrepareJobAsync(job.ProjectId, job.Id, cancellationToken);
+            var assignedStep = await plans.PrepareJobAsync(job.Id);
             if (assignedStep is not null) { job.PlanStepId = assignedStep.Id; job.PlanStepTitle = assignedStep.Title; }
             var prompt = job.Prompt;
             var images = new List<string>();
@@ -136,11 +147,25 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
             }
             AgentRuntimeResult? runtimeResult = null;
             string output;
-            if (context.RuntimeSettings.Enabled)
+            var hasPlan = await plans.HasPlanAsync(job.Id);
+            if (!hasPlan)
+            {
+                var planningPrompt = context.Project.SystemPrompt + """
+
+                    Create the complete fixed execution-step list for this job. Do not use tools and do not create or modify any project file. Return only strict JSON in this exact shape: {"steps":["First small verifiable implementation step","Second small verifiable implementation step"]}. Define 3–12 ordered steps that fully cover the requested work. These database-backed steps become the loop's immutable source of truth; later runs cannot add or restructure them.
+                    """;
+                output = await client.CompleteAsync(selectedModel, planningPrompt, messages, prompt, images, cancellationToken);
+                await plans.CreatePlanAsync(job.Id, output);
+                runtimeResult = new AgentRuntimeResult { Output = output, Outcome = AgentRunOutcomes.PlanCreated };
+            }
+            else if (assignedStep is null)
+            {
+                throw new InvalidOperationException("The loop has no eligible fixed step to execute.");
+            }
+            else if (context.RuntimeSettings.Enabled)
             {
                 runtimeResult = await runtime.RunAsync(selectedModel, context.Project, job, messages, prompt, images, context.RuntimeSettings, cancellationToken);
                 output = runtimeResult.Output;
-                await plans.SynchronizeFromWorkspaceAsync(job.ProjectId, cancellationToken);
                 if (runtimeResult.Outcome == AgentRunOutcomes.ChangesCompleted) await plans.CompleteJobAsync(job.Id, runtimeResult);
             }
             else output = await client.CompleteAsync(selectedModel, context.Project.SystemPrompt + "\n\nYou may create result files by returning fenced blocks in the form ```file:relative/path.ext followed by text content, or ```base64-file:relative/path.ext followed by base64 data. Source project files are read-only; all generated files are saved in a new result folder.", messages, prompt, images, cancellationToken);
@@ -178,8 +203,8 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
                     var conversation = state.Conversations.FirstOrDefault(x => x.Id == current.ConversationId);
                     if (conversation is not null) { conversation.Messages.Add(new ConversationMessage { JobId = current.Id, Role = "assistant", Content = output, FilePaths = current.ResultItems.Select(x => x.RelativePath).ToList() }); conversation.UpdatedAt = DateTimeOffset.UtcNow; }
                     var success = planned
-                        ? "Project plan created. The next loop run will implement its first unchecked task."
-                        : $"Implementation step completed with {current.ProjectFilesChanged.Count(path => !path.Equals("PLAN.md", StringComparison.OrdinalIgnoreCase))} project file change(s), and PLAN.md was updated.";
+                        ? "Fixed loop steps created in server state. The next loop run will implement the first step."
+                        : $"Implementation step completed with {current.ProjectFilesChanged.Count} project file change(s).";
                     if (backgroundPublishPaths.Count > 0) success += $" {backgroundPublishPaths.Count} generated file{(backgroundPublishPaths.Count == 1 ? " is" : "s are")} queued for background Git synchronization.";
                     state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = string.IsNullOrWhiteSpace(pushError) ? MessageLevels.Info : MessageLevels.Warning, Text = string.IsNullOrWhiteSpace(pushError) ? success : $"{success} The run-report Git push failed: {pushError}" });
                 }

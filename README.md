@@ -74,6 +74,8 @@ Configure a model in the **Models** tab, then select it as the project default. 
 
 For a fast, long-context OpenRouter connection, select **OpenRouter** and use the preconfigured `qwen/qwen3.5-35b-a3b` model (262K context). Use `deepseek/deepseek-v4-flash` when a 1M-token context window is more important. Keep the model URL at `https://openrouter.ai/api/v1`, leave authentication as **Bearer token**, and paste your own OpenRouter key into **API credential**. The credential is encrypted in the application database and is never stored in this repository.
 
+Each recurring loop owns an immutable execution plan stored directly in application state. Its first job asks the model for a structured step list without exposing file tools or creating a planning file. Later jobs receive one assigned server-managed step and may complete, retry, or skip the original steps, but cannot append, remove, rename, or reorder them. Implementation runs never create or update `PLAN.md`, versioned plan files, checklists, or progress Markdown; file tools are reserved for actual implementation changes. The server automatically stops the loop when all original steps are succeeded, skipped, or terminally failed. Create a new loop to generate a new set of steps.
+
 ## Git provider connections
 
 Projects can be linked to any number of repositories across GitHub, GitLab, Bitbucket Cloud, Codeberg, Gitea Cloud or self-hosted Gitea, SourceHut, AWS CodeCommit, Azure DevOps Repos, Google Cloud Secure Source Manager, and Gitee. Connections can be added during first-run setup or managed later in **Connections**.
