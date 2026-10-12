@@ -14,8 +14,8 @@
 @if (TempData["Message"] is string message) { <div class="notice">@message</div> }
 
 <nav class="tabs">
-    <button class="tab active" data-tab="projects">Projects</button><button class="tab" data-tab="steps">Execution plan</button><button class="tab" data-tab="files">Folders & files</button><button class="tab" data-tab="jobs">Jobs</button><button class="tab" data-tab="chats">Chats</button>
-    @if (Model.IsAdmin) { <button class="tab" data-tab="tools">Tools</button><button class="tab advanced-tab" data-tab="workspace">AI workspace access <small>Advanced</small></button><button class="tab" data-tab="connections">Connections</button><button class="tab" data-tab="access">Access</button> }
+    <button class="tab active" data-tab="projects">Projects</button><button class="tab" data-tab="steps">Steps</button><button class="tab" data-tab="jobs">Jobs</button><button class="tab" data-tab="files">Files</button><button class="tab" data-tab="chats">Messages</button>
+    @if (Model.IsAdmin) { <button class="tab advanced-tab" data-tab="workspace">AI access <small>Advanced</small></button><button class="tab" data-tab="connections">Connections</button><button class="tab" data-tab="access">Users</button> }
 </nav>
 
 <section id="projects" class="panel tab-panel active" data-disclosure-scope>
@@ -78,12 +78,12 @@
 </section>
 
 <section id="steps" class="panel tab-panel" data-disclosure-scope>
-    <div class="section-title"><div><p class="eyebrow">SERVER-MANAGED WORKFLOW</p><h2>Execution plan</h2><p class="muted">AI proposes the plan; the server owns step order, attempts, retries, and outcomes. PLAN.md is restored from this record if it is deleted.</p></div><div class="export-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".plan-board">Expand all</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".plan-board">Collapse all</button><a class="button secondary" asp-controller="Export" asp-action="Plans">Export CSV</a></div></div>
+    <div class="section-title"><div><p class="eyebrow">SERVER-MANAGED WORKFLOW</p><h2>Steps</h2><p class="muted">AI proposes the plan; the server owns step order, attempts, retries, and outcomes. PLAN.md is restored from this record if it is deleted.</p></div><div class="export-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".plan-board">Expand all</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".plan-board">Collapse all</button><a class="button secondary" asp-controller="Export" asp-action="Plans">Export CSV</a></div></div>
     <div id="plan-steps-list" data-plan-steps-url="@Url.Action("PlanStepsPartial", "Home")" data-disclosure-scope>@await Html.PartialAsync("_PlanSteps", Model)</div>
 </section>
 
 <section id="files" class="panel tab-panel" data-disclosure-scope>
-    <div class="section-title"><div><h2>Folders & files</h2><p class="muted">Upload, create folders, preview, edit, or safely remove project files.</p></div><a class="button secondary" asp-controller="Export" asp-action="Files">Export CSV</a></div>
+    <div class="section-title"><div><h2>Files</h2><p class="muted">Upload, create folders, preview, edit, or safely remove project files.</p></div><a class="button secondary" asp-controller="Export" asp-action="Files">Export CSV</a></div>
     @if (!Model.VisibleProjects.Any()) { <div class="empty">No project workspaces are available yet.</div> }
     @if (Model.VisibleProjects.Any())
     {
@@ -101,7 +101,7 @@
 </section>
 
 <section id="chats" class="panel tab-panel">
-    <div class="section-title"><div><p class="eyebrow">REQUEST & RESPONSE HISTORY</p><h2>Chats</h2><p class="muted">Messages and request/response history update independently without refreshing the page.</p></div></div>
+    <div class="section-title"><div><p class="eyebrow">REQUEST, RESPONSE & ACTIVITY HISTORY</p><h2>Messages</h2><p class="muted">System messages, chats, AI responses, and tool calls update independently without refreshing the page.</p></div></div>
     <section class="live-history-panel" data-disclosure-scope>
         <header class="live-history-head"><div><h3>Warnings, errors, and system messages</h3><p>Newest first · scroll for older messages</p></div><div class="live-history-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".message-item">Expand</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".message-item">Collapse</button><a class="button secondary" asp-controller="Export" asp-action="Messages">CSV</a>@if (Model.IsAdmin) { <form asp-controller="Manage" asp-action="ClearMessages" method="post" data-live-clear data-clear-target="messages-list" data-confirm="Clear all warnings, errors, and system messages?"><button class="link-danger">Clear</button></form> }</div></header>
         <div id="messages-list" data-live-list="messages" data-live-url="@Url.Action("MessagesPartial", "Home")">@await Html.PartialAsync("_MessagesList", Model)</div>
@@ -110,15 +110,17 @@
         <header class="live-history-head"><div><h3>Chats</h3><p>Newest first · scroll for older chats</p></div><div class="live-history-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".chat-thread">Expand</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".chat-thread">Collapse</button><a class="button secondary" asp-controller="Export" asp-action="Chats">CSV</a>@if (Model.IsAdmin) { <form asp-controller="Manage" asp-action="ClearChats" method="post" data-live-clear data-clear-target="chats-list" data-confirm="Clear all saved chats?"><button class="link-danger">Clear</button></form> }</div></header>
         <div id="chats-list" data-live-list="chats" data-live-url="@Url.Action("ChatsPartial", "Home")">@await Html.PartialAsync("_ChatsList", Model)</div>
     </section>
+    @if (Model.IsAdmin)
+    {
+        <section class="live-history-panel" data-disclosure-scope>
+            <header class="live-history-head"><div><h3>Tool calls</h3><p>AI project-tool requests and their saved results</p></div><div class="live-history-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".runtime-audit-item">Expand</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".runtime-audit-item">Collapse</button><a class="button secondary" asp-controller="Export" asp-action="Tools">CSV</a><form asp-controller="AgentRuntime" asp-action="ClearAudit" method="post" onsubmit="return confirm('Clear the tool activity history?')"><button class="link-danger">Clear</button></form></div></header>
+            <div id="tool-audit-list" data-tool-audit-url="@Url.Action("ToolAuditPartial", "Home")">@await Html.PartialAsync("_ToolAuditList", Model)</div>
+        </section>
+    }
 </section>
 
 @if (Model.IsAdmin)
 {
-<section id="tools" class="panel tab-panel">
-    <div class="section-title runtime-audit-title"><div><p class="eyebrow">AI TOOL AUDIT</p><h2>Tools</h2><p class="muted">Open a row to see exactly which project tool ran and what it returned.</p></div><div class="export-actions"><a class="button secondary" asp-controller="Export" asp-action="Tools">Export CSV</a><form asp-controller="AgentRuntime" asp-action="ClearAudit" method="post" onsubmit="return confirm('Clear the tool activity history?')"><button class="link-danger">Clear activity</button></form></div></div>
-    <div id="tool-audit-list" data-tool-audit-url="@Url.Action("ToolAuditPartial", "Home")">@await Html.PartialAsync("_ToolAuditList", Model)</div>
-</section>
-
 <section id="workspace" class="panel tab-panel">
     @await Html.PartialAsync("_ToolConfiguration", Model)
 </section>
@@ -237,14 +239,15 @@
     </div>
 </section>
 
-<section id="access" class="panel tab-panel">
-    <div class="section-title"><div><p class="eyebrow">USERS & PERMISSIONS</p><h2>Access control</h2></div><a class="button secondary" asp-controller="Export" asp-action="Access">Export CSV</a></div>
+<section id="access" class="panel tab-panel" data-disclosure-scope>
+    <div class="section-title"><div><p class="eyebrow">ACCOUNTS & PROJECT PERMISSIONS</p><h2>Users</h2></div><div class="export-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".user-card">Expand all</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".user-card">Collapse all</button><a class="button secondary" asp-controller="Export" asp-action="Access">Export CSV</a></div></div>
     <form asp-controller="Manage" asp-action="CreateUser" method="post" class="form-grid create-box open"><label>Username<input name="username" required /></label><label>Password<input name="password" type="password" minlength="10" required /></label><label>Role<select name="role"><option value="Member">Member</option><option value="Admin">Admin</option></select></label><button>Create user</button></form>
     @foreach (var user in Model.State.Users)
     {
-        <article class="user-card"><div class="user-head"><div><strong>@user.Username</strong><span class="pill">@user.Role · @(user.IsEnabled ? "enabled" : "disabled")</span></div>@if (user.Id != Model.CurrentUserId) { <form asp-controller="Manage" asp-action="ToggleUser" method="post"><input type="hidden" name="id" value="@user.Id"/><button class="secondary">@(user.IsEnabled ? "Disable" : "Enable")</button></form> }</div>
+        <details class="user-card"><summary class="user-head"><div><strong>@user.Username</strong><span class="pill">@user.Role · @(user.IsEnabled ? "enabled" : "disabled")</span></div><span class="pill">Manage</span></summary>
+        <div class="user-management"><form asp-controller="Manage" asp-action="UpdateUser" method="post" class="form-grid compact"><input type="hidden" name="id" value="@user.Id"/><label>Role<select name="role"><option value="Member" selected="@(user.Role == Roles.Member)">Member</option><option value="Admin" selected="@(user.Role == Roles.Admin)">Admin</option></select></label><label>New password<input name="password" type="password" minlength="10" placeholder="Leave blank to keep current" /></label><button class="secondary">Save user</button></form>@if (user.Id != Model.CurrentUserId) { <div class="actions"><form asp-controller="Manage" asp-action="ToggleUser" method="post"><input type="hidden" name="id" value="@user.Id"/><button class="secondary">@(user.IsEnabled ? "Disable" : "Enable")</button></form><form asp-controller="Manage" asp-action="DeleteUser" method="post" onsubmit="return confirm('Delete this user and their project permissions?')"><input type="hidden" name="id" value="@user.Id"/><button class="danger">Delete user</button></form></div> }</div>
         @if (user.Role != Roles.Admin) { <div class="permissions">@foreach (var project in Model.State.Projects) { var permission = Model.State.Permissions.FirstOrDefault(x => x.UserId == user.Id && x.ProjectId == project.Id); <form asp-controller="Manage" asp-action="SetPermission" method="post"><input type="hidden" name="userId" value="@user.Id"/><input type="hidden" name="projectId" value="@project.Id"/><strong>@project.Name</strong><label class="check"><input type="checkbox" name="canView" value="true" checked="@(permission?.CanView == true)"/> View</label><label class="check"><input type="checkbox" name="canManage" value="true" checked="@(permission?.CanManage == true)"/> Manage</label><label class="check"><input type="checkbox" name="canRun" value="true" checked="@(permission?.CanRun == true)"/> Run</label><button class="secondary">Save</button></form> }</div> }
-        </article>
+        </details>
     }
 </section>
 }

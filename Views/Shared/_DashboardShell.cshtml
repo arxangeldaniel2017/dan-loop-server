@@ -9,6 +9,6 @@
     <div class="metrics"><div><strong>@projectCount</strong><span>projects</span></div><div><strong>@liveLoopCount</strong><span>live loops</span></div></div>
 </section>
 <nav class="tabs dashboard-page-tabs">
-    <a class="tab" href="@DashboardTab("projects")">Projects</a><a class="tab" href="@DashboardTab("steps")">Execution plan</a><a class="tab active" href="@DashboardTab("files")">Folders & files</a><a class="tab" href="@DashboardTab("jobs")">Jobs</a><a class="tab" href="@DashboardTab("chats")">Chats</a>
-    @if (isAdmin) { <a class="tab" href="@DashboardTab("tools")">Tools</a><a class="tab advanced-tab" href="@DashboardTab("workspace")">AI workspace access <small>Advanced</small></a><a class="tab" href="@DashboardTab("connections")">Connections</a><a class="tab" href="@DashboardTab("access")">Access</a> }
+    <a class="tab" href="@DashboardTab("projects")">Projects</a><a class="tab" href="@DashboardTab("steps")">Steps</a><a class="tab" href="@DashboardTab("jobs")">Jobs</a><a class="tab active" href="@DashboardTab("files")">Files</a><a class="tab" href="@DashboardTab("chats")">Messages</a>
+    @if (isAdmin) { <a class="tab advanced-tab" href="@DashboardTab("workspace")">AI access <small>Advanced</small></a><a class="tab" href="@DashboardTab("connections")">Connections</a><a class="tab" href="@DashboardTab("access")">Users</a> }
 </nav>

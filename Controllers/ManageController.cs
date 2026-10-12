@@ -459,22 +459,59 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     public async Task<IActionResult> CreateUser(string username, string password, string role)
     {
         username = username.Trim();
-        if (username.Length < 3 || password.Length < 10) return Back("Username must be 3+ characters and password 10+ characters.");
+        if (username.Length < 3 || password.Length < 10) return Users("Username must be 3+ characters and password 10+ characters.");
         var created = await store.UpdateAsync(state =>
         {
             if (state.Users.Any(x => x.Username.Equals(username, StringComparison.OrdinalIgnoreCase))) return false;
             state.Users.Add(new AppUser { Username = username, PasswordHash = passwords.Hash(password), Role = role == Roles.Admin ? Roles.Admin : Roles.Member });
             return true;
         });
-        return Back(created ? "User created." : "Username already exists.");
+        return Users(created ? "User created." : "Username already exists.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> UpdateUser(Guid id, string role, string? password)
+    {
+        if (!string.IsNullOrEmpty(password) && password.Length < 10) return Users("A new password must be at least 10 characters.");
+        var result = await store.UpdateAsync(state =>
+        {
+            var user = state.Users.FirstOrDefault(item => item.Id == id);
+            if (user is null) return "User was not found.";
+            var nextRole = role == Roles.Admin ? Roles.Admin : Roles.Member;
+            if (id == CurrentUserId() && user.Role != nextRole) return "You cannot change your own role while signed in.";
+            if (user.Role == Roles.Admin && nextRole != Roles.Admin && state.Users.Count(item => item.Role == Roles.Admin) <= 1)
+                return "The final administrator cannot be changed to a member.";
+            user.Role = nextRole;
+            if (!string.IsNullOrEmpty(password)) user.PasswordHash = passwords.Hash(password);
+            return "User updated.";
+        });
+        return Users(result);
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> DeleteUser(Guid id)
+    {
+        if (id == CurrentUserId()) return Users("You cannot delete your own account.");
+        var result = await store.UpdateAsync(state =>
+        {
+            var user = state.Users.FirstOrDefault(item => item.Id == id);
+            if (user is null) return "User was not found.";
+            if (user.Role == Roles.Admin && state.Users.Count(item => item.Role == Roles.Admin) <= 1)
+                return "The final administrator cannot be deleted.";
+            state.Users.Remove(user);
+            state.Permissions.RemoveAll(item => item.UserId == id);
+            state.PendingUploads.RemoveAll(item => item.UserId == id);
+            return "User and their project permissions were deleted.";
+        });
+        return Users(result);
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> ToggleUser(Guid id)
     {
-        if (id == CurrentUserId()) return Back("You cannot disable your own account.");
+        if (id == CurrentUserId()) return Users("You cannot disable your own account.");
         await store.UpdateAsync(state => { var user = state.Users.First(x => x.Id == id); user.IsEnabled = !user.IsEnabled; return true; });
-        return Back("User status changed.");
+        return Users("User status changed.");
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
@@ -486,7 +523,7 @@ public sealed class ManageController(StateStore store, PasswordService passwords
             if (canView || canManage || canRun) state.Permissions.Add(new ProjectPermission { UserId = userId, ProjectId = projectId, CanView = canView || canManage || canRun, CanManage = canManage, CanRun = canRun });
             return true;
         });
-        return Back("Permissions updated.");
+        return Users("Permissions updated.");
     }
 
     private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -510,5 +547,6 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     private static bool ValidEndpoint(string endpoint) => Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 
     private IActionResult Connections(string message) { TempData["Message"] = message; return Redirect("/#connections"); }
+    private IActionResult Users(string message) { TempData["Message"] = message; return Redirect("/#access"); }
     private IActionResult Back(string message) { TempData["Message"] = message; return RedirectToAction("Index", "Home"); }
 }
