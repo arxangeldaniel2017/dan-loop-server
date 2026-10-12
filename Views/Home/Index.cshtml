@@ -26,6 +26,8 @@
             <form asp-controller="Manage" asp-action="CreateProject" method="post" class="form-grid">
                 <label>Name<input name="name" required maxlength="100" /></label>
                 <label>Default model<select name="defaultModelId"><option value="">None</option>@foreach (var m in Model.State.Models.Where(x => x.IsEnabled)) { <option value="@m.Id">@m.Name</option> }</select></label>
+                <label>Task cooldown (seconds)<input name="taskDelaySeconds" type="number" min="0" max="86400" value="10" required /><small class="field-help">Minimum pause after a project job finishes before another scheduled task starts.</small></label>
+                <label>Job timeout (minutes)<input name="jobTimeoutMinutes" type="number" min="1" max="15" value="15" required /><small class="field-help">Stops a job that exceeds this total runtime.</small></label>
                 <label class="wide">Description<input name="description" maxlength="500" /></label>
                 <label class="wide">Project system prompt<textarea name="systemPrompt" rows="4" placeholder="Instructions applied to every job in this project"></textarea></label>
                 <button>Create project</button>
@@ -47,6 +49,7 @@
                 <details><summary>Edit project & prompt</summary>
                     <form asp-controller="Manage" asp-action="UpdateProject" method="post" class="form-grid compact"><input type="hidden" name="id" value="@project.Id" />
                         <label>Name<input name="name" value="@project.Name" required /></label><label>Default model<select name="defaultModelId"><option value="">None</option>@foreach (var m in Model.State.Models.Where(x => x.IsEnabled)) { <option value="@m.Id" selected="@(m.Id == project.DefaultModelId)">@m.Name</option> }</select></label>
+                        <label>Task cooldown (seconds)<input name="taskDelaySeconds" type="number" min="0" max="86400" value="@project.TaskDelaySeconds" required /><small class="field-help">Pause after any project job before the scheduler starts the next task.</small></label><label>Job timeout (minutes)<input name="jobTimeoutMinutes" type="number" min="1" max="15" value="@project.JobTimeoutMinutes" required /><small class="field-help">Maximum total runtime for one job.</small></label>
                         <label class="wide">Description<input name="description" value="@project.Description" /></label><label class="wide">System prompt<textarea name="systemPrompt" rows="4">@project.SystemPrompt</textarea></label><button>Save changes</button>
                     </form>
                 </details>
@@ -62,7 +65,7 @@
                 {
                     <details class="loop-item" data-disclosure-id="loop-@loop.Id"><summary><span class="status @(loop.IsEnabled ? "online" : "")"></span><strong>@loop.Name</strong><small>every @loop.IntervalSeconds sec · @loop.ExecutionCount run@(loop.ExecutionCount == 1 ? "" : "s") · @(loop.LastQueuedAt?.ToLocalTime().ToString("g") ?? "not run") · limit @(loop.MaxExecutions?.ToString() ?? "unlimited")</small></summary><div class="loop-item-body"><p>@loop.Prompt</p>
                         @if (CanManage(project.Id)) { <form asp-controller="Manage" asp-action="SetLoopExecutionLimit" method="post" class="loop-limit-form"><input type="hidden" name="id" value="@loop.Id"/><label>Execution limit<input name="maxExecutions" type="number" min="1" step="1" value="@loop.MaxExecutions" placeholder="Unlimited" /></label><button class="secondary">Save limit</button><small>Leave blank for unlimited retries.</small></form> }
-                        @if (CanManage(project.Id)) { <div class="actions"><form asp-controller="Manage" asp-action="ToggleLoop" method="post"><input type="hidden" name="id" value="@loop.Id"/><button class="secondary">@(loop.IsEnabled ? "Stop" : "Start")</button></form><form asp-controller="Manage" asp-action="DeleteLoop" method="post" onsubmit="return confirm('Delete this loop?')"><input type="hidden" name="id" value="@loop.Id"/><button class="danger">Delete</button></form></div> }
+                        @if (CanManage(project.Id)) { <div class="actions">@if (loop.IsEnabled && CanRun(project.Id)) { <form asp-controller="Manage" asp-action="RunLoopNow" method="post"><input type="hidden" name="id" value="@loop.Id"/><button>Run now</button></form> }<form asp-controller="Manage" asp-action="ToggleLoop" method="post"><input type="hidden" name="id" value="@loop.Id"/><button class="secondary">@(loop.IsEnabled ? "Stop" : "Start")</button></form><form asp-controller="Manage" asp-action="DeleteLoop" method="post" onsubmit="return confirm('Delete this loop?')"><input type="hidden" name="id" value="@loop.Id"/><button class="danger">Delete</button></form></div> }
                     </div></details>
                 }
             </div>

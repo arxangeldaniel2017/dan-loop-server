@@ -10,19 +10,19 @@ namespace DanLoopServer.Controllers;
 public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, AiModelDiscoveryService modelDiscovery, WorkspaceService workspace, GitProviderService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations, S3ObjectStorage objectStorage, LoginSecurityService loginSecurity) : Controller
 {
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
-    public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId)
+    public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId, int taskDelaySeconds = 10, int jobTimeoutMinutes = 15)
     {
         if (string.IsNullOrWhiteSpace(name)) return Back("Project name is required.");
-        await store.UpdateAsync(state => { state.Projects.Add(new Project { Name = name.Trim(), Description = description?.Trim() ?? "", SystemPrompt = systemPrompt?.Trim() ?? "", DefaultModelId = defaultModelId }); return true; });
+        await store.UpdateAsync(state => { state.Projects.Add(new Project { Name = name.Trim(), Description = description?.Trim() ?? "", SystemPrompt = systemPrompt?.Trim() ?? "", DefaultModelId = defaultModelId, TaskDelaySeconds = Math.Clamp(taskDelaySeconds, 0, 86_400), JobTimeoutMinutes = Math.Clamp(jobTimeoutMinutes, 1, 15) }); return true; });
         return Back("Project created.");
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> UpdateProject(Guid id, string? name, string? description, string? systemPrompt, Guid? defaultModelId)
+    public async Task<IActionResult> UpdateProject(Guid id, string? name, string? description, string? systemPrompt, Guid? defaultModelId, int taskDelaySeconds = 10, int jobTimeoutMinutes = 15)
     {
         if (!await CanAsync(id, manage: true)) return Forbid();
         if (string.IsNullOrWhiteSpace(name)) return Back("Project name is required.");
-        await store.UpdateAsync(state => { var x = state.Projects.First(p => p.Id == id); x.Name = name.Trim(); x.Description = description?.Trim() ?? ""; x.SystemPrompt = systemPrompt?.Trim() ?? ""; x.DefaultModelId = defaultModelId; return true; });
+        await store.UpdateAsync(state => { var x = state.Projects.First(p => p.Id == id); x.Name = name.Trim(); x.Description = description?.Trim() ?? ""; x.SystemPrompt = systemPrompt?.Trim() ?? ""; x.DefaultModelId = defaultModelId; x.TaskDelaySeconds = Math.Clamp(taskDelaySeconds, 0, 86_400); x.JobTimeoutMinutes = Math.Clamp(jobTimeoutMinutes, 1, 15); return true; });
         return Back("Project updated.");
     }
 
@@ -99,6 +99,51 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     }
 
     [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> RunLoopNow(Guid id)
+    {
+        var loop = await store.ReadAsync(state => state.Loops.FirstOrDefault(item => item.Id == id));
+        if (loop is null) return NotFound();
+        if (!await CanAsync(loop.ProjectId, run: true)) return Forbid();
+        var userId = CurrentUserId();
+        var message = await store.UpdateAsync(state =>
+        {
+            var current = state.Loops.First(item => item.Id == id);
+            if (!current.IsEnabled) return "Start the loop before running it now.";
+            var active = state.Jobs.FirstOrDefault(job => job.LoopId == id && job.Status == JobStatuses.Running);
+            if (active is not null) return $"Loop '{current.Name}' is already running.";
+            var queued = state.Jobs.FirstOrDefault(job => job.LoopId == id && job.Status == JobStatuses.Queued);
+            var now = DateTimeOffset.UtcNow;
+            if (queued is not null)
+            {
+                queued.RunImmediately = true;
+                current.LastQueuedAt = now;
+                return $"Loop '{current.Name}' was promoted to run next; its following schedule was reset.";
+            }
+            var executionCount = Math.Max(current.ExecutionCount, state.Jobs.Count(job => job.LoopId == id));
+            current.ExecutionCount = executionCount;
+            if (current.MaxExecutions is int maximum && executionCount >= maximum)
+                return $"Loop '{current.Name}' has reached its execution limit of {maximum}.";
+            var project = state.Projects.FirstOrDefault(item => item.Id == current.ProjectId);
+            if (project is null || !state.Models.Any(model => model.IsEnabled)) return "No enabled AI connection is available.";
+            var conversation = new Conversation { ProjectId = current.ProjectId, Title = current.Name };
+            var job = new Job
+            {
+                ProjectId = current.ProjectId, LoopId = current.Id, ModelId = project.DefaultModelId,
+                RequiredCapability = AiCapabilities.Orchestrator, Prompt = current.Prompt, CreatedByUserId = userId,
+                CreatedAt = now, ConversationId = conversation.Id, RunImmediately = true
+            };
+            state.Conversations.Add(conversation);
+            state.Jobs.Add(job);
+            conversation.Messages.Add(new ConversationMessage { JobId = job.Id, Role = "user", Content = job.Prompt });
+            current.ExecutionCount++;
+            current.LastQueuedAt = now;
+            state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = job.Id, Level = MessageLevels.Info, Text = $"Loop '{current.Name}' was started immediately. Its pending scheduled occurrence was replaced." });
+            return $"Loop '{current.Name}' queued to run now; its following schedule was reset.";
+        });
+        return Back(message);
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> RunJob(Guid projectId, string prompt, Guid? modelId, string? requiredCapability, Guid? conversationId, List<string>? attachmentPaths)
     {
         if (!await CanAsync(projectId, run: true)) return Forbid();
@@ -114,7 +159,7 @@ public sealed class ManageController(StateStore store, PasswordService passwords
                 state.Conversations.Add(conversation);
             }
             var capability = AiCapabilities.All.Contains(requiredCapability ?? "") ? requiredCapability! : AiCapabilities.Orchestrator;
-            var job = new Job { ProjectId = projectId, Prompt = prompt.Trim(), ModelId = modelId ?? project.DefaultModelId, RequiredCapability = capability, CreatedByUserId = userId, ConversationId = conversation.Id, AttachmentPaths = attachmentPaths?.Distinct().ToList() ?? [] };
+            var job = new Job { ProjectId = projectId, Prompt = prompt.Trim(), ModelId = modelId ?? project.DefaultModelId, RequiredCapability = capability, CreatedByUserId = userId, ConversationId = conversation.Id, AttachmentPaths = attachmentPaths?.Distinct().ToList() ?? [], RunImmediately = true };
             state.Jobs.Add(job);
             conversation.Messages.Add(new ConversationMessage { JobId = job.Id, Role = "user", Content = job.Prompt, FilePaths = job.AttachmentPaths });
             conversation.UpdatedAt = DateTimeOffset.UtcNow;

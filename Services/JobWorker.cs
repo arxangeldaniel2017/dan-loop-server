@@ -13,17 +13,20 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
                 await ScheduleLoopsAsync();
                 var next = await store.UpdateAsync(state =>
                 {
-                    var job = state.Jobs.OrderBy(x => x.CreatedAt).FirstOrDefault(x => x.Status == JobStatuses.Queued);
+                    var job = state.Jobs.OrderByDescending(x => x.RunImmediately).ThenBy(x => x.CreatedAt).FirstOrDefault(x => x.Status == JobStatuses.Queued);
                     if (job is null) return null;
                     job.Status = JobStatuses.Running;
                     job.StartedAt = DateTimeOffset.UtcNow;
-                    return new Job { Id = job.Id, ProjectId = job.ProjectId, LoopId = job.LoopId, ModelId = job.ModelId, RequiredCapability = job.RequiredCapability, FailedModelIds = job.FailedModelIds.ToList(), Prompt = job.Prompt, ConversationId = job.ConversationId, AttachmentPaths = job.AttachmentPaths, PlanStepId = job.PlanStepId, PlanStepTitle = job.PlanStepTitle };
+                    return new Job { Id = job.Id, ProjectId = job.ProjectId, LoopId = job.LoopId, ModelId = job.ModelId, RequiredCapability = job.RequiredCapability, FailedModelIds = job.FailedModelIds.ToList(), Prompt = job.Prompt, ConversationId = job.ConversationId, AttachmentPaths = job.AttachmentPaths, PlanStepId = job.PlanStepId, PlanStepTitle = job.PlanStepTitle, RunImmediately = job.RunImmediately };
                 });
                 if (next is not null)
                 {
                     using var execution = cancellations.Register(next.Id, stoppingToken);
+                    var timeoutMinutes = await store.ReadAsync(state => Math.Clamp(state.Projects.FirstOrDefault(project => project.Id == next.ProjectId)?.JobTimeoutMinutes ?? 15, 1, 15));
+                    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(execution.Token);
+                    timeout.CancelAfter(TimeSpan.FromMinutes(timeoutMinutes));
                     var stillRunning = await store.ReadAsync(state => state.Jobs.FirstOrDefault(item => item.Id == next.Id)?.Status == JobStatuses.Running);
-                    if (stillRunning) await RunAsync(next, execution.Token, stoppingToken);
+                    if (stillRunning) await RunAsync(next, timeout.Token, stoppingToken, timeoutMinutes);
                 }
                 else await Task.Delay(1000, stoppingToken);
             }
@@ -46,15 +49,22 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
             // A recurring loop owns one execution at a time. Slow work must not build an
             // ever-growing queue behind the active execution.
             if (state.Jobs.Any(job => job.LoopId == loop.Id && job.Status is JobStatuses.Queued or JobStatuses.Running)) continue;
-            if (loop.LastQueuedAt is not null && now - loop.LastQueuedAt < TimeSpan.FromSeconds(Math.Max(10, loop.IntervalSeconds))) continue;
+            var project = state.Projects.FirstOrDefault(x => x.Id == loop.ProjectId);
+            if (project is null || !state.Models.Any(model => model.IsEnabled)) continue;
+            var nextAt = loop.LastQueuedAt?.AddSeconds(Math.Max(10, loop.IntervalSeconds)) ?? DateTimeOffset.MinValue;
+            var lastCompletedAt = state.Jobs.Where(job => job.ProjectId == loop.ProjectId && job.CompletedAt is not null).Max(job => job.CompletedAt);
+            if (lastCompletedAt is DateTimeOffset completedAt)
+            {
+                var afterCooldown = completedAt.AddSeconds(Math.Clamp(project.TaskDelaySeconds, 0, 86_400));
+                if (afterCooldown > nextAt) nextAt = afterCooldown;
+            }
+            if (now < nextAt) continue;
             if (loop.MaxExecutions is int maximum && executionCount >= maximum)
             {
                 loop.IsEnabled = false;
                 state.Messages.Add(new AppMessage { ProjectId = loop.ProjectId, Level = MessageLevels.Info, Text = $"Loop '{loop.Name}' reached its execution limit of {maximum} and was paused." });
                 continue;
             }
-            var project = state.Projects.FirstOrDefault(x => x.Id == loop.ProjectId);
-            if (project is null || !state.Models.Any(model => model.IsEnabled)) continue;
             var conversation = new Conversation { ProjectId = loop.ProjectId, Title = loop.Name };
             state.Conversations.Add(conversation);
             var job = new Job
@@ -70,7 +80,7 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
         return true;
     });
 
-    private async Task RunAsync(Job job, CancellationToken cancellationToken, CancellationToken applicationStoppingToken)
+    private async Task RunAsync(Job job, CancellationToken cancellationToken, CancellationToken applicationStoppingToken, int timeoutMinutes)
     {
         var projectRoot = await workspace.ResolveProjectPathAsync(job.ProjectId, "");
         var requiredCapability = string.IsNullOrWhiteSpace(job.RequiredCapability)
@@ -185,6 +195,13 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
             if (wasCancelledByUser)
             {
                 await plans.CancelJobsAsync([job.Id], "Execution stopped because its job or recurring loop was stopped.");
+                return;
+            }
+            if (!applicationStoppingToken.IsCancellationRequested)
+            {
+                var error = $"Job timed out after {timeoutMinutes} minute{(timeoutMinutes == 1 ? "" : "s")}.";
+                await plans.FailJobAsync(job.Id, error);
+                await FailAsync(job.Id, error);
                 return;
             }
             await plans.InterruptJobAsync(job.Id);

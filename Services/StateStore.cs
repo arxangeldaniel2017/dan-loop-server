@@ -249,6 +249,15 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                         _state.AgentRuntime.Settings.MaxFileOutputTokens = 32_768;
                     _state.Version = 20;
                 }
+                if (_state.Version < 21)
+                {
+                    foreach (var project in _state.Projects)
+                    {
+                        project.TaskDelaySeconds = project.TaskDelaySeconds <= 0 ? 10 : Math.Clamp(project.TaskDelaySeconds, 0, 86_400);
+                        project.JobTimeoutMinutes = project.JobTimeoutMinutes <= 0 ? 15 : Math.Clamp(project.JobTimeoutMinutes, 1, 15);
+                    }
+                    _state.Version = 21;
+                }
                 await SaveUnsafeAsync();
                 return;
             }

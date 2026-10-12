@@ -9,10 +9,23 @@
     var auditVersion = string.Join('|', visibleAudits.Take(25).Select(audit => $"{audit.Id:N}:{audit.Status}:{audit.CompletedAt?.ToUnixTimeMilliseconds()}"));
     var version = string.Join('|', jobs.Select(job => $"{job.Id:N}:{job.Status}:{job.StartedAt?.ToUnixTimeMilliseconds()}:{job.CompletedAt?.ToUnixTimeMilliseconds()}:{job.ResultsCommitUrl}:{job.ProjectCommitUrl}:{job.ProjectFilesChanged.Count}:{job.ResultsPushError}:{job.PlanStepId}")) + "|" + auditVersion;
     var visibleProjectIds = Model.VisibleProjects.Select(project => project.Id).ToHashSet();
+    bool CanRun(Guid projectId) => Model.IsAdmin || Model.State.Permissions.Any(permission => permission.UserId == Model.CurrentUserId && permission.ProjectId == projectId && permission.CanRun);
     var runningJobs = jobs.Where(job => job.Status == JobStatuses.Running).OrderByDescending(job => job.StartedAt).ToList();
     var queuedJobs = jobs.Where(job => job.Status == JobStatuses.Queued).OrderBy(job => job.CreatedAt).ToList();
     var enabledLoops = Model.State.Loops.Where(loop => visibleProjectIds.Contains(loop.ProjectId) && loop.IsEnabled).ToList();
-    var nextLoop = enabledLoops.Select(loop => new { Loop = loop, NextAt = loop.LastQueuedAt is DateTimeOffset last ? last.AddSeconds(Math.Max(10, loop.IntervalSeconds)) : DateTimeOffset.UtcNow }).OrderBy(item => item.NextAt).FirstOrDefault();
+    DateTimeOffset NextRunAt(LoopDefinition loop)
+    {
+        var nextAt = loop.LastQueuedAt is DateTimeOffset last ? last.AddSeconds(Math.Max(10, loop.IntervalSeconds)) : DateTimeOffset.UtcNow;
+        var project = Model.State.Projects.FirstOrDefault(item => item.Id == loop.ProjectId);
+        var completedAt = Model.State.Jobs.Where(job => job.ProjectId == loop.ProjectId && job.CompletedAt is not null).Max(job => job.CompletedAt);
+        if (project is not null && completedAt is DateTimeOffset completed)
+        {
+            var afterCooldown = completed.AddSeconds(Math.Clamp(project.TaskDelaySeconds, 0, 86_400));
+            if (afterCooldown > nextAt) nextAt = afterCooldown;
+        }
+        return nextAt;
+    }
+    var nextLoop = enabledLoops.Select(loop => new { Loop = loop, NextAt = NextRunAt(loop) }).OrderBy(item => item.NextAt).FirstOrDefault();
     var activityState = runningJobs.Any() ? "running" : queuedJobs.Any() || enabledLoops.Any() ? "waiting" : "stopped";
     var activityVersion = $"{activityState}:{runningJobs.Count}:{queuedJobs.Count}:{nextLoop?.Loop.Id}:{nextLoop?.NextAt.ToUnixTimeSeconds()}";
     version = $"{activityVersion}|{version}";
@@ -46,6 +59,10 @@
         @if (runningJobs.Count > 1 || queuedJobs.Any())
         {
             <span class="activity-count">@runningJobs.Count running · @queuedJobs.Count waiting</span>
+        }
+        @if (!runningJobs.Any() && !queuedJobs.Any() && nextLoop is not null && CanRun(nextLoop.Loop.ProjectId))
+        {
+            <form asp-controller="Manage" asp-action="RunLoopNow" method="post" class="run-now-form"><input type="hidden" name="id" value="@nextLoop.Loop.Id"/><button>Run now</button></form>
         }
     </div>
     <div class="disclosure-toolbar jobs-toolbar">

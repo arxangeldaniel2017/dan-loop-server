@@ -2,7 +2,7 @@ namespace DanLoopServer.Models;
 
 public sealed class AppState
 {
-    public int Version { get; set; } = 20;
+    public int Version { get; set; } = 21;
     public List<AppUser> Users { get; set; } = [];
     public List<Project> Projects { get; set; } = [];
     public List<LoopDefinition> Loops { get; set; } = [];
@@ -45,6 +45,8 @@ public sealed class Project
     public string Description { get; set; } = "";
     public string SystemPrompt { get; set; } = "";
     public Guid? DefaultModelId { get; set; }
+    public int TaskDelaySeconds { get; set; } = 10;
+    public int JobTimeoutMinutes { get; set; } = 15;
     public string WorkspaceFolder { get; set; } = "";
     public string RepositoryFolder { get; set; } = "";
     public List<string> UserManagedPaths { get; set; } = [];
@@ -93,6 +95,7 @@ public sealed class Job
     public Guid? PlanStepId { get; set; }
     public string PlanStepTitle { get; set; } = "";
     public List<AgentResponseLog> AiResponses { get; set; } = [];
+    public bool RunImmediately { get; set; }
     public string Status { get; set; } = JobStatuses.Queued;
     public string Output { get; set; } = "";
     public string Error { get; set; } = "";

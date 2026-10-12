@@ -65,10 +65,11 @@ public sealed class ExportController(StateStore store, WorkspaceService workspac
         var rows = view.State.Projects.Where(project => view.ProjectIds.Contains(project.Id)).OrderBy(project => project.Name).Select(project => new object?[]
         {
             project.Id, project.Name, project.Description, Iso(project.CreatedAt), project.WorkspaceFolder, StateStore.ProjectRepositoryFolder(project),
+            project.TaskDelaySeconds, project.JobTimeoutMinutes,
             view.State.Loops.Count(loop => loop.ProjectId == project.Id), view.State.Jobs.Count(job => job.ProjectId == project.Id),
             project.AutoPublishPendingPaths.Count, Iso(project.LastAutoPublishAt), project.LastAutoPublishCommitUrl, project.LastAutoPublishError
         });
-        return Csv("projects", ["Project ID", "Name", "Description", "Created UTC", "Workspace", "Repository folder", "Loops", "Jobs", "Pending Git files", "Last Git sync UTC", "Last Git commit", "Last Git error"], rows);
+        return Csv("projects", ["Project ID", "Name", "Description", "Created UTC", "Workspace", "Repository folder", "Task cooldown seconds", "Job timeout minutes", "Loops", "Jobs", "Pending Git files", "Last Git sync UTC", "Last Git commit", "Last Git error"], rows);
     }
 
     [HttpGet]
