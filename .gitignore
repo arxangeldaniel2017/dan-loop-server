@@ -2,6 +2,7 @@ bin/
 obj/
 data/*
 !Data/ai-connections.json
+!Data/ai-models-expanded.json
 .DS_Store
 *.user
 *.suo

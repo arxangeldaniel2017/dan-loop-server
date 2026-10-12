@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <Content Include="Data/ai-connections.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Data/ai-models-expanded.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

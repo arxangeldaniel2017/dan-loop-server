@@ -220,7 +220,25 @@ public sealed class AiProviderCatalogItem
     public string PricingUrl { get; set; } = "";
     public string IconUrl { get; set; } = "";
     public string Category { get; set; } = "AI provider";
+    public string ModelDiscovery { get; set; } = AiModelDiscoveryModes.None;
+    public bool ModelDiscoveryRequiresCredential { get; set; }
     public List<AiModelCatalogItem> Models { get; set; } = [];
+}
+
+public static class AiModelDiscoveryModes
+{
+    public const string None = "none";
+    public const string OpenAi = "openai";
+    public const string Gemini = "gemini";
+    public const string Anthropic = "anthropic";
+    public const string Replicate = "replicate";
+    public const string ElevenLabs = "elevenlabs";
+    public const string Stability = "stability";
+    public const string Cloudflare = "cloudflare";
+    public const string HuggingFace = "huggingface";
+    public const string Databricks = "databricks";
+    public const string Cohere = "cohere";
+    public static readonly string[] All = [None, OpenAi, Gemini, Anthropic, Replicate, ElevenLabs, Stability, Cloudflare, HuggingFace, Databricks, Cohere];
 }
 
 public static class AiApiProtocols

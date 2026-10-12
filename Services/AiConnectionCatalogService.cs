@@ -6,6 +6,7 @@ namespace DanLoopServer.Services;
 public sealed class AiConnectionCatalogService(StateStore store, IWebHostEnvironment environment, ILogger<AiConnectionCatalogService> logger)
 {
     private readonly string _path = Path.Combine(environment.ContentRootPath, "Data", "ai-connections.json");
+    private readonly string _expandedModelsPath = Path.Combine(environment.ContentRootPath, "Data", "ai-models-expanded.json");
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
@@ -13,6 +14,12 @@ public sealed class AiConnectionCatalogService(StateStore store, IWebHostEnviron
         await using var stream = File.OpenRead(_path);
         var catalog = await JsonSerializer.DeserializeAsync<List<AiProviderCatalogItem>>(stream,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, cancellationToken) ?? [];
+        await MergeExpandedModelsAsync(catalog, cancellationToken);
+        foreach (var provider in catalog)
+        {
+            provider.ModelDiscovery = AiModelDiscoveryService.DiscoveryModeFor(provider.Id);
+            provider.ModelDiscoveryRequiresCredential = AiModelDiscoveryService.DiscoveryRequiresCredential(provider.Id);
+        }
         ValidateCatalog(catalog);
         await store.UpdateAsync(state =>
         {
@@ -29,6 +36,21 @@ public sealed class AiConnectionCatalogService(StateStore store, IWebHostEnviron
         });
         logger.LogInformation("Loaded {ProviderCount} AI providers and {ModelCount} predefined models from {Path}",
             catalog.Count, catalog.Sum(provider => provider.Models.Count), _path);
+    }
+
+    private async Task MergeExpandedModelsAsync(List<AiProviderCatalogItem> catalog, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(_expandedModelsPath)) return;
+        await using var stream = File.OpenRead(_expandedModelsPath);
+        var additions = await JsonSerializer.DeserializeAsync<Dictionary<string, List<AiModelCatalogItem>>>(stream,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, cancellationToken) ?? [];
+        foreach (var (providerId, models) in additions)
+        {
+            var provider = catalog.FirstOrDefault(item => item.Id.Equals(providerId, StringComparison.OrdinalIgnoreCase));
+            if (provider is null) throw new InvalidDataException($"Expanded model catalog references unknown provider '{providerId}'.");
+            provider.Models = provider.Models.Concat(models)
+                .GroupBy(item => item.Id, StringComparer.OrdinalIgnoreCase).Select(group => group.First()).ToList();
+        }
     }
 
     public static List<string> SuggestedCapabilities(IEnumerable<AiProviderCatalogItem> catalog, string providerId, string modelId)
@@ -78,6 +100,7 @@ public sealed class AiConnectionCatalogService(StateStore store, IWebHostEnviron
         {
             if (string.IsNullOrWhiteSpace(provider.Id) || string.IsNullOrWhiteSpace(provider.Name)) throw new InvalidDataException("Every AI provider requires an id and name.");
             if (!AiApiProtocols.All.Contains(provider.ApiProtocol)) throw new InvalidDataException($"Provider {provider.Id} has unsupported protocol '{provider.ApiProtocol}'.");
+            if (!AiModelDiscoveryModes.All.Contains(provider.ModelDiscovery)) throw new InvalidDataException($"Provider {provider.Id} has unsupported model discovery mode '{provider.ModelDiscovery}'.");
             if (provider.Models.Count == 0) throw new InvalidDataException($"Provider {provider.Id} has no model choices.");
             if (!provider.RequiresBaseUrl && string.IsNullOrWhiteSpace(provider.BaseUrl)) throw new InvalidDataException($"Provider {provider.Id} requires a catalog base URL or requiresBaseUrl=true.");
         }

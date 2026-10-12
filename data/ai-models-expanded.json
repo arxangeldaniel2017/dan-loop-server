@@ -1,0 +1,226 @@
+{
+  "openai": [
+    { "id": "gpt-4.1", "name": "GPT-4.1", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] },
+    { "id": "gpt-4.1-mini", "name": "GPT-4.1 mini", "capabilities": ["Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "o3", "name": "o3", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] },
+    { "id": "o4-mini", "name": "o4-mini", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "openrouter": [
+    { "id": "meta-llama/llama-3.3-70b-instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "mistralai/mistral-large", "name": "Mistral Large", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "cohere/command-r-plus", "name": "Command R+", "capabilities": ["Planner", "Tool calling", "Generator", "Files"] },
+    { "id": "x-ai/grok-4", "name": "Grok 4", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "runpod": [
+    { "id": "meta-llama/Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "deepseek-ai/DeepSeek-V3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct", "name": "Qwen3 Coder 480B", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }
+  ],
+  "google": [
+    { "id": "gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash-Lite", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Image", "Audio", "Video", "Files"] },
+    { "id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Image", "Audio", "Video", "Files"] },
+    { "id": "imagen-4.0-generate-001", "name": "Imagen 4", "capabilities": ["Generator", "Image", "Files"] },
+    { "id": "veo-3.0-generate-preview", "name": "Veo 3", "capabilities": ["Generator", "Video", "Audio", "Files"] }
+  ],
+  "groq": [
+    { "id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B Versatile", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "llama-3.1-8b-instant", "name": "Llama 3.1 8B Instant", "capabilities": ["Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "deepseek-r1-distill-llama-70b", "name": "DeepSeek R1 Distill Llama 70B", "capabilities": ["Planner", "Coder", "Generator", "Files"] }
+  ],
+  "mistral": [
+    { "id": "mistral-medium-latest", "name": "Mistral Medium", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "mistral-small-latest", "name": "Mistral Small", "capabilities": ["Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "pixtral-large-latest", "name": "Pixtral Large", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Image", "Files"] }
+  ],
+  "together": [
+    { "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "name": "Llama 3.3 70B Turbo", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "Qwen/Qwen3-235B-A22B-fp8-tput", "name": "Qwen3 235B", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "black-forest-labs/FLUX.1-schnell", "name": "FLUX.1 Schnell", "capabilities": ["Generator", "Image", "Files"] }
+  ],
+  "fireworks": [
+    { "id": "accounts/fireworks/models/llama-v3p3-70b-instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "accounts/fireworks/models/deepseek-v3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "accounts/fireworks/models/flux-1-schnell-fp8", "name": "FLUX.1 Schnell", "capabilities": ["Generator", "Image", "Files"] }
+  ],
+  "deepseek": [
+    { "id": "deepseek-coder", "name": "DeepSeek Coder", "capabilities": ["Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "deepseek-v3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "xai": [
+    { "id": "grok-4-fast", "name": "Grok 4 Fast", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "grok-3", "name": "Grok 3", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "grok-3-mini", "name": "Grok 3 Mini", "capabilities": ["Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "cerebras": [
+    { "id": "llama-3.3-70b", "name": "Llama 3.3 70B", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "qwen-3-32b", "name": "Qwen3 32B", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "sambanova": [
+    { "id": "Meta-Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "Qwen3-32B", "name": "Qwen3 32B", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "nvidia": [
+    { "id": "nvidia/llama-3.1-nemotron-ultra-253b-v1", "name": "Llama Nemotron Ultra 253B", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "qwen/qwen3-coder-480b-a35b-instruct", "name": "Qwen3 Coder 480B", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }
+  ],
+  "bedrock": [
+    { "id": "anthropic.claude-sonnet-4-20250514-v1:0", "name": "Claude Sonnet 4", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] },
+    { "id": "meta.llama3-3-70b-instruct-v1:0", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "amazon.nova-pro-v1:0", "name": "Amazon Nova Pro", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Image", "Files"] }
+  ],
+  "azure": [
+    { "id": "gpt-5", "name": "GPT-5 deployment", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] },
+    { "id": "gpt-4.1", "name": "GPT-4.1 deployment", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "o3", "name": "o3 deployment", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "huggingface": [
+    { "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct", "name": "Qwen3 Coder 480B", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] },
+    { "id": "deepseek-ai/DeepSeek-V3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "meta-llama/Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "cloudflare": [
+    { "id": "@cf/meta/llama-3.3-70b-instruct-fp8-fast", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "@cf/qwen/qwen3-30b-a3b-fp8", "name": "Qwen3 30B", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "@cf/black-forest-labs/flux-1-schnell", "name": "FLUX.1 Schnell", "capabilities": ["Generator", "Image", "Files"] }
+  ],
+  "alibaba": [
+    { "id": "qwen-max", "name": "Qwen Max", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "qwen-plus", "name": "Qwen Plus", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "qwen-coder-plus", "name": "Qwen Coder Plus", "capabilities": ["Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "deepinfra": [
+    { "id": "Qwen/Qwen3-Coder-480B-A35B-Instruct", "name": "Qwen3 Coder 480B", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] },
+    { "id": "openai/gpt-oss-120b", "name": "GPT-OSS 120B", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "novita": [
+    { "id": "meta-llama/llama-3.3-70b-instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "qwen/qwen3-coder-480b-a35b-instruct", "name": "Qwen3 Coder 480B", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }
+  ],
+  "nebius": [
+    { "id": "deepseek-ai/DeepSeek-V3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "meta-llama/Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "hyperbolic": [
+    { "id": "meta-llama/Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "Qwen/Qwen3-235B-A22B", "name": "Qwen3 235B", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "replicate": [
+    { "id": "black-forest-labs/flux-schnell", "name": "FLUX Schnell", "capabilities": ["Generator", "Image", "Files"] },
+    { "id": "google/veo-3", "name": "Google Veo 3", "capabilities": ["Generator", "Video", "Audio", "Files"] },
+    { "id": "meta/meta-llama-3-70b-instruct", "name": "Llama 3 70B Instruct", "capabilities": ["Planner", "Coder", "Generator", "Files"] }
+  ],
+  "fal": [
+    { "id": "fal-ai/flux-pro/v1.1", "name": "FLUX Pro 1.1", "capabilities": ["Generator", "Image", "Files"] },
+    { "id": "fal-ai/flux/schnell", "name": "FLUX Schnell", "capabilities": ["Generator", "Image", "Files"] },
+    { "id": "fal-ai/kling-video/v2.1/master/text-to-video", "name": "Kling Video 2.1", "capabilities": ["Generator", "Video", "Files"] }
+  ],
+  "baseten": [
+    { "id": "deployed-model", "name": "Deployed model", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "model-endpoint", "name": "Model endpoint alias", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "siliconflow": [
+    { "id": "Qwen/Qwen3-235B-A22B", "name": "Qwen3 235B", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "Pro/deepseek-ai/DeepSeek-R1", "name": "DeepSeek R1 Pro", "capabilities": ["Planner", "Coder", "Generator", "Files"] }
+  ],
+  "featherless": [
+    { "id": "deepseek-ai/DeepSeek-V3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "meta-llama/Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "anthropic": [
+    { "id": "claude-3-7-sonnet-latest", "name": "Claude 3.7 Sonnet", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] },
+    { "id": "claude-3-5-haiku-latest", "name": "Claude 3.5 Haiku", "capabilities": ["Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "cohere": [
+    { "id": "command-a-reasoning-08-2025", "name": "Command A Reasoning", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "command-r7b-12-2024", "name": "Command R7B", "capabilities": ["Tool calling", "Generator", "Files"] }
+  ],
+  "zai": [
+    { "id": "glm-4.5-x", "name": "GLM-4.5-X", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "glm-4.5-flash", "name": "GLM-4.5 Flash", "capabilities": ["Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "moonshot": [
+    { "id": "kimi-k2-turbo-preview", "name": "Kimi K2 Turbo", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "moonshot-v1-128k", "name": "Moonshot v1 128K", "capabilities": ["Planner", "Coder", "Generator", "Files"] }
+  ],
+  "minimax": [
+    { "id": "MiniMax-Text-01", "name": "MiniMax Text 01", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "MiniMax-VL-01", "name": "MiniMax VL 01", "capabilities": ["Planner", "Generator", "Image", "Files"] }
+  ],
+  "perplexity": [
+    { "id": "sonar-reasoning-pro", "name": "Sonar Reasoning Pro", "capabilities": ["Planner", "Generator", "Files"] },
+    { "id": "sonar-deep-research", "name": "Sonar Deep Research", "capabilities": ["Planner", "Orchestrator", "Generator", "Files"] }
+  ],
+  "ai21": [
+    { "id": "jamba-mini", "name": "Jamba Mini", "capabilities": ["Tool calling", "Generator", "Files"] },
+    { "id": "jamba-1.5-large", "name": "Jamba 1.5 Large", "capabilities": ["Planner", "Tool calling", "Generator", "Files"] }
+  ],
+  "stability": [
+    { "id": "stable-image-core", "name": "Stable Image Core", "capabilities": ["Generator", "Image", "Files"] },
+    { "id": "sd3.5-large", "name": "Stable Diffusion 3.5 Large", "capabilities": ["Generator", "Image", "Files"] }
+  ],
+  "elevenlabs": [
+    { "id": "eleven_flash_v2_5", "name": "Eleven Flash v2.5", "capabilities": ["Generator", "Audio", "Files"] },
+    { "id": "eleven_turbo_v2_5", "name": "Eleven Turbo v2.5", "capabilities": ["Generator", "Audio", "Files"] }
+  ],
+  "vertex": [
+    { "id": "google/gemini-2.5-flash", "name": "Gemini 2.5 Flash", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Image", "Audio", "Video", "Files"] },
+    { "id": "meta/llama-3.3-70b-instruct-maas", "name": "Llama 3.3 70B MaaS", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "digitalocean": [
+    { "id": "llama3.3-70b-instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "deepseek-r1-distill-llama-70b", "name": "DeepSeek R1 Distill Llama 70B", "capabilities": ["Planner", "Coder", "Generator", "Files"] }
+  ],
+  "watsonx": [
+    { "id": "ibm/granite-3-8b-instruct", "name": "Granite 3 8B Instruct", "capabilities": ["Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "meta-llama/llama-3-3-70b-instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "oci": [
+    { "id": "cohere.command-r-plus", "name": "Command R+", "capabilities": ["Planner", "Tool calling", "Generator", "Files"] },
+    { "id": "meta.llama-3.3-70b-instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "databricks": [
+    { "id": "databricks-meta-llama-3-3-70b-instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "databricks-dbrx-instruct", "name": "DBRX Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "modal": [
+    { "id": "deployed-model", "name": "Deployed model", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "default", "name": "Default endpoint model", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "vast": [
+    { "id": "meta-llama/Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "Qwen/Qwen3-Coder", "name": "Qwen3 Coder", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }
+  ],
+  "lambda": [
+    { "id": "hermes-3-llama-3.1-405b-fp8", "name": "Hermes 3 Llama 405B", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "llama3.3-70b-instruct-fp8", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "coreweave": [
+    { "id": "deployed-model", "name": "Deployed model", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "default", "name": "Default endpoint model", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "gmi": [
+    { "id": "meta-llama/Llama-3.3-70B-Instruct", "name": "Llama 3.3 70B Instruct", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "deepseek-ai/DeepSeek-V3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "lepton": [
+    { "id": "llama3.3-70b", "name": "Llama 3.3 70B", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "deepseek-v3", "name": "DeepSeek V3", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "paperspace": [
+    { "id": "deployed-model", "name": "Deployed model", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "default", "name": "Default endpoint model", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "ollama": [
+    { "id": "llama3.3", "name": "Llama 3.3", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "deepseek-r1", "name": "DeepSeek R1", "capabilities": ["Planner", "Coder", "Generator", "Files"] },
+    { "id": "qwen3", "name": "Qwen3", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "lmstudio": [
+    { "id": "local-model", "name": "Local model", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] },
+    { "id": "default", "name": "Default loaded model", "capabilities": ["Planner", "Coder", "Tool calling", "Generator", "Files"] }
+  ],
+  "custom": [
+    { "id": "default", "name": "Default model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] },
+    { "id": "deployed-model", "name": "Deployed model alias", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] }
+  ]
+}

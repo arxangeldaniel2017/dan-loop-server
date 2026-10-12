@@ -12,11 +12,45 @@ public sealed class AiModelDiscoveryService(HttpClient http, IDataProtectionProv
     private readonly IDataProtector _protector = protectionProvider.CreateProtector("remote-model-api-keys-v1");
     private readonly ConcurrentDictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(15);
+    private static readonly HashSet<string> OpenAiDiscoveryProviders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "openai", "openrouter", "runpod", "groq", "mistral", "together", "fireworks", "deepseek", "xai", "cerebras",
+        "sambanova", "nvidia", "azure", "deepinfra", "novita", "nebius", "hyperbolic",
+        "siliconflow", "featherless", "ollama", "lmstudio"
+    };
+
+    public static string DiscoveryModeFor(string providerId)
+    {
+        if (OpenAiDiscoveryProviders.Contains(providerId)) return AiModelDiscoveryModes.OpenAi;
+        return providerId.ToLowerInvariant() switch
+        {
+            "google" => AiModelDiscoveryModes.Gemini,
+            "anthropic" => AiModelDiscoveryModes.Anthropic,
+            "replicate" => AiModelDiscoveryModes.Replicate,
+            "elevenlabs" => AiModelDiscoveryModes.ElevenLabs,
+            "stability" => AiModelDiscoveryModes.Stability,
+            "cloudflare" => AiModelDiscoveryModes.Cloudflare,
+            "huggingface" => AiModelDiscoveryModes.HuggingFace,
+            "databricks" => AiModelDiscoveryModes.Databricks,
+            "cohere" => AiModelDiscoveryModes.Cohere,
+            _ => AiModelDiscoveryModes.None
+        };
+    }
+
+    public static bool DiscoveryRequiresCredential(string providerId) => providerId.ToLowerInvariant() switch
+    {
+        "openrouter" or "huggingface" or "elevenlabs" or "ollama" or "lmstudio" => false,
+        _ => DiscoveryModeFor(providerId) != AiModelDiscoveryModes.None
+    };
 
     public async Task<AiModelDiscoveryResult> DiscoverAsync(AiProviderCatalogItem provider, string baseUrl, string apiKey,
         string? authenticationType, string? apiKeyHeaderName, bool forceRefresh, CancellationToken cancellationToken)
     {
         baseUrl = (string.IsNullOrWhiteSpace(baseUrl) ? provider.BaseUrl : baseUrl).TrimEnd('/');
+        if (provider.ModelDiscovery == AiModelDiscoveryModes.None)
+            throw new InvalidOperationException($"{provider.Name} does not provide a reliable model discovery API for this connection type.");
+        if (provider.ModelDiscoveryRequiresCredential && string.IsNullOrWhiteSpace(apiKey))
+            throw new InvalidOperationException($"Enter the {provider.Name} credential before loading its private model catalog.");
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             throw new InvalidOperationException("Enter a valid provider endpoint before loading models.");
         var credentialFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(apiKey)))[..16];
@@ -46,7 +80,7 @@ public sealed class AiModelDiscoveryService(HttpClient http, IDataProtectionProv
             try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                AiRequestAuthentication.Apply(request, model, apiKey);
+                ApplyDiscoveryAuthentication(request, provider, model, apiKey);
                 if (provider.Id.Equals("anthropic", StringComparison.OrdinalIgnoreCase)) request.Headers.TryAddWithoutValidation("anthropic-version", "2023-06-01");
                 using var response = await http.SendAsync(request, cancellationToken);
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -63,8 +97,39 @@ public sealed class AiModelDiscoveryService(HttpClient http, IDataProtectionProv
 
     private static IEnumerable<string> CandidateUrls(AiProviderCatalogItem provider, string baseUrl)
     {
-        if (provider.Id.Equals("stability", StringComparison.OrdinalIgnoreCase)) { yield return baseUrl.TrimEnd('/') + "/v1/engines/list"; yield break; }
-        yield return baseUrl.TrimEnd('/') + "/models";
+        switch (provider.ModelDiscovery)
+        {
+            case AiModelDiscoveryModes.Gemini:
+                var geminiRoot = baseUrl.Replace("/openai", "", StringComparison.OrdinalIgnoreCase).TrimEnd('/');
+                yield return geminiRoot + "/models?pageSize=1000"; break;
+            case AiModelDiscoveryModes.Stability:
+                yield return baseUrl.TrimEnd('/') + "/v1/engines/list"; break;
+            case AiModelDiscoveryModes.Cloudflare:
+                var marker = baseUrl.IndexOf("/ai/", StringComparison.OrdinalIgnoreCase);
+                if (marker >= 0) yield return baseUrl[..marker].TrimEnd('/') + "/ai/models/search?per_page=100";
+                break;
+            case AiModelDiscoveryModes.HuggingFace:
+                yield return "https://huggingface.co/api/models?inference=warm&limit=200&sort=downloads&direction=-1"; break;
+            case AiModelDiscoveryModes.Databricks:
+                var apiMarker = baseUrl.IndexOf("/serving-endpoints", StringComparison.OrdinalIgnoreCase);
+                var databricksRoot = apiMarker >= 0 ? baseUrl[..apiMarker] : baseUrl;
+                yield return databricksRoot.TrimEnd('/') + "/api/2.0/serving-endpoints"; break;
+            case AiModelDiscoveryModes.Cohere:
+                var cohereRoot = baseUrl.Replace("/compatibility/v1", "", StringComparison.OrdinalIgnoreCase).TrimEnd('/');
+                yield return cohereRoot + "/v1/models"; break;
+            default:
+                yield return baseUrl.TrimEnd('/') + "/models"; break;
+        }
+    }
+
+    private static void ApplyDiscoveryAuthentication(HttpRequestMessage request, AiProviderCatalogItem provider, RemoteModel model, string apiKey)
+    {
+        if (provider.ModelDiscovery == AiModelDiscoveryModes.Gemini && !string.IsNullOrWhiteSpace(apiKey))
+        {
+            request.Headers.TryAddWithoutValidation("x-goog-api-key", apiKey);
+            return;
+        }
+        AiRequestAuthentication.Apply(request, model, apiKey);
     }
 
     private static List<AiModelCatalogItem> ParseModels(string body, AiProviderCatalogItem provider)
@@ -74,7 +139,7 @@ public sealed class AiModelDiscoveryService(HttpClient http, IDataProtectionProv
         var candidates = new List<JsonElement>();
         if (root.ValueKind == JsonValueKind.Array) candidates.AddRange(root.EnumerateArray());
         else if (root.ValueKind == JsonValueKind.Object)
-            foreach (var property in new[] { "data", "models", "results", "items" })
+            foreach (var property in new[] { "data", "models", "results", "items", "result", "value", "endpoints" })
                 if (root.TryGetProperty(property, out var list) && list.ValueKind == JsonValueKind.Array) { candidates.AddRange(list.EnumerateArray()); break; }
         var models = new List<AiModelCatalogItem>();
         foreach (var item in candidates)

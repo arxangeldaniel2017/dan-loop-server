@@ -169,6 +169,9 @@ document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
     }
     updateAuthentication(provider);
     updateCapabilities(provider);
+    const discoveryAvailable = provider.modelDiscovery && provider.modelDiscovery !== 'none' && (!provider.requiresBaseUrl || Boolean(baseUrl?.value.trim())) && (!provider.modelDiscoveryRequiresCredential || Boolean(apiKeyInput?.value.trim()));
+    loadModels?.closest('.model-discovery-actions')?.toggleAttribute('hidden', !discoveryAvailable);
+    if (discoveryStatus) { discoveryStatus.textContent = ''; discoveryStatus.classList.remove('error'); }
   };
   const updateModel = () => {
     const custom = modelSelect?.value === '__custom__';
@@ -208,8 +211,18 @@ document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
     }
   };
   providerSelect?.addEventListener('change', updateProvider);
+  baseUrl?.addEventListener('input', () => {
+    const provider = aiCatalog.find(item => item.id === providerSelect?.value);
+    const available = provider?.modelDiscovery && provider.modelDiscovery !== 'none' && (!provider.requiresBaseUrl || Boolean(baseUrl.value.trim())) && (!provider.modelDiscoveryRequiresCredential || Boolean(apiKeyInput?.value.trim()));
+    loadModels?.closest('.model-discovery-actions')?.toggleAttribute('hidden', !available);
+  });
   modelSelect?.addEventListener('change', updateModel);
   customModelInput?.addEventListener('input', updateModel);
+  apiKeyInput?.addEventListener('input', () => {
+    const provider = aiCatalog.find(item => item.id === providerSelect?.value);
+    const available = provider?.modelDiscovery && provider.modelDiscovery !== 'none' && (!provider.requiresBaseUrl || Boolean(baseUrl?.value.trim())) && (!provider.modelDiscoveryRequiresCredential || Boolean(apiKeyInput.value.trim()));
+    loadModels?.closest('.model-discovery-actions')?.toggleAttribute('hidden', !available);
+  });
   authenticationSelect?.addEventListener('change', () => updateAuthentication(aiCatalog.find(item => item.id === providerSelect?.value)));
   loadModels?.addEventListener('click', discoverModels);
   providerPicker = createIconSelect(providerSelect, option => {
