@@ -125,7 +125,7 @@
     @await Html.PartialAsync("_ToolConfiguration", Model)
 </section>
 
-<section id="connections" class="panel tab-panel" data-disclosure-scope>
+<section id="connections" class="panel tab-panel" data-disclosure-scope data-connection-workspace="dashboard">
     <div class="section-title"><div><p class="eyebrow">SERVICES & MODEL ROUTING</p><h2>Connections</h2><p class="muted">Models are tried by capability and priority. If one fails, the same job continues with the next eligible connection.</p></div><div class="export-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".connection-card,.github-card">Expand all</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".connection-card,.github-card">Collapse all</button><a class="button secondary" asp-controller="Export" asp-action="Models">Export CSV</a></div></div>
     <details class="create-box connection-creator"><summary>＋ Add connection</summary>
         <form asp-controller="Manage" asp-action="CreateModel" method="post" class="form-grid" data-ai-connection-form>
@@ -219,22 +219,6 @@
         <details class="github-card" open="@(!Model.State.Projects.Any())">
             <summary class="project-head"><div><h3>@connection.AccountLogin</h3><p>@connection.AuthenticationType authentication · @connection.AccountType · @connection.Repositories.Count repositories · refreshed @connection.RefreshedAt.ToLocalTime().ToString("g")</p></div><span class="pill">@connection.Provider</span></summary>
             <div class="actions">@if (!string.IsNullOrWhiteSpace(connection.SettingsUrl)) { <a class="button secondary" href="@connection.SettingsUrl">Manage on @connection.Provider</a> }<form asp-controller="GitHub" asp-action="Refresh" method="post"><input type="hidden" name="id" value="@connection.Id"/><button class="secondary">Refresh</button></form><form asp-controller="GitHub" asp-action="Delete" method="post" onsubmit="return confirm('Remove this Git provider connection from the server?')"><input type="hidden" name="id" value="@connection.Id"/><button class="link-danger">Remove</button></form></div>
-            <section class="repository-catalog" aria-label="Repositories available from @connection.AccountLogin">
-                <div class="repository-catalog-head"><strong>Available repositories</strong><span class="pill">@connection.Repositories.Count</span></div>
-                @if (connection.Repositories.Any())
-                {
-                    <div class="repository-catalog-list">
-                    @foreach (var repository in connection.Repositories.OrderBy(x => x.FullName, StringComparer.OrdinalIgnoreCase))
-                    {
-                        <a href="@repository.HtmlUrl" target="_blank" rel="noopener"><span>@repository.FullName</span><small>@(repository.IsPrivate ? "private" : "public")</small></a>
-                    }
-                    </div>
-                }
-                else
-                {
-                    <p class="muted">No repositories were returned. Refresh the connection after granting repository access.</p>
-                }
-            </section>
             @if (!Model.State.Projects.Any())
             {
                 <div class="repository-project-empty">Create a project to select, import, and publish to these repositories.</div>

@@ -136,12 +136,16 @@ public sealed class AccountController(StateStore store, PasswordService password
             Catalog = state.AiProviderCatalog,
             Models = state.Models.ToList(),
             GitConnections = state.GitHubConnections.ToList(),
-            StorageConnections = state.ObjectStorageConnections.ToList()
+            StorageConnections = state.ObjectStorageConnections.ToList(),
+            Projects = state.Projects.ToList(),
+            ProjectRepositories = state.ProjectRepositories.ToList()
         });
         ViewBag.Catalog = options.Catalog;
         ViewBag.Models = options.Models;
         ViewBag.GitHubConnections = options.GitConnections;
         ViewBag.ObjectStorageConnections = options.StorageConnections;
+        ViewBag.Projects = options.Projects;
+        ViewBag.ProjectRepositories = options.ProjectRepositories;
     }
 
     [AllowAnonymous, HttpGet, ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]

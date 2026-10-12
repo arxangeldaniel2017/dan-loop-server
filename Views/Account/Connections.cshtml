@@ -6,15 +6,17 @@
     var models = ViewBag.Models as List<RemoteModel> ?? [];
     var gitConnections = ViewBag.GitHubConnections as List<GitHubConnection> ?? [];
     var storageConnections = ViewBag.ObjectStorageConnections as List<ObjectStorageConnection> ?? [];
+    var projects = ViewBag.Projects as List<Project> ?? [];
+    var projectRepositories = ViewBag.ProjectRepositories as List<ProjectRepository> ?? [];
 }
-<div class="wizard-hub">
+<div class="wizard-hub" data-connection-workspace="wizard">
     <header class="wizard-hub-head">
         <div>
             <p class="eyebrow">FIRST RUN · STEP 3 OF 3</p>
             <h1>Add connections.</h1>
             <p>Start with the primary AI connection, then optionally add Git and object storage. Add as many as you need now, or return to Connections later.</p>
         </div>
-        <a class="button secondary" asp-controller="Home" asp-action="Index">Skip all connections</a>
+        <a class="button secondary" asp-controller="Home" asp-action="Index" data-collapse-add-form>Skip all connections</a>
     </header>
 
     @if (TempData["Message"] is string message)
@@ -36,8 +38,17 @@
         </div>
         @if (models.Any())
         {
-            <div class="wizard-connections">@foreach (var connection in models) { <span class="pill">@connection.Name · @connection.ModelId</span> }</div>
+            <div class="connection-list wizard-added-connections">
+            @foreach (var connection in models)
+            {
+                <details class="connection-card">
+                    <summary><span class="status @(connection.IsEnabled ? "online" : "")"></span><div><h3>@connection.Name</h3><p>@connection.ModelId · priority @connection.Priority</p></div><span class="pill">AI connected</span></summary>
+                    <div class="connection-meta"><span>@connection.BaseUrl</span><span>@connection.AuthenticationType</span><span>@string.Join(", ", connection.Capabilities.DefaultIfEmpty("Default capabilities"))</span></div>
+                </details>
+            }
+            </div>
         }
+        <details class="wizard-add-form" open="@(!models.Any())"><summary>＋ Add another AI connection</summary>
         <form asp-action="ConfigureModel" method="post" class="form-grid" data-ai-connection-form>
             <input type="hidden" name="returnUrl" value="/Account/Connections#ai" />
             <input type="hidden" name="addAnother" value="true" />
@@ -52,8 +63,9 @@
             <label data-ai-api-key>API credential<input name="apiKey" type="password" autocomplete="off" /></label>
             <fieldset class="capability-picker wide"><legend>Active capabilities</legend>@foreach (var capability in AiCapabilities.All) { <label class="check" data-ai-capability="@capability"><input type="checkbox" name="capabilities" value="@capability" /> @capability</label> }</fieldset>
             <div class="wide provider-links" data-provider-links></div>
-            <div class="wide wizard-section-actions"><button>Add AI connection</button><a class="button secondary" href="#git">Skip AI / continue to Git →</a></div>
+            <div class="wide wizard-section-actions"><button>Add AI connection</button><a class="button secondary" href="#git" data-collapse-add-form>Skip AI / continue to Git →</a></div>
         </form>
+        </details>
     </section>
 
     <section class="wizard-connection-section" id="git">
@@ -63,8 +75,31 @@
         </div>
         @if (gitConnections.Any())
         {
-            <div class="wizard-connections">@foreach (var connection in gitConnections) { <span class="pill">@connection.Provider · @connection.AccountLogin</span> }</div>
+            @foreach (var connection in gitConnections)
+            {
+                <details class="github-card">
+                    <summary class="project-head"><div><h3>@connection.AccountLogin</h3><p>@connection.AuthenticationType authentication · @connection.Repositories.Count repositories · refreshed @connection.RefreshedAt.ToLocalTime().ToString("g")</p></div><span class="pill">@connection.Provider connected</span></summary>
+                    <div class="actions">@if (!string.IsNullOrWhiteSpace(connection.SettingsUrl)) { <a class="button secondary" href="@connection.SettingsUrl" target="_blank" rel="noopener">Manage on @connection.Provider</a> }<form asp-controller="GitHub" asp-action="Refresh" method="post"><input type="hidden" name="id" value="@connection.Id"/><input type="hidden" name="returnUrl" value="/Account/Connections#git"/><button class="secondary">Refresh repositories</button></form></div>
+                    @foreach (var project in projects)
+                    {
+                        var selected = projectRepositories.Where(x => x.ProjectId == project.Id && x.GitHubConnectionId == connection.Id).Select(x => x.RepositoryId).ToHashSet();
+                        <form asp-controller="GitHub" asp-action="SetProjectRepositories" method="post" class="repository-map">
+                            <input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="connectionId" value="@connection.Id"/><input type="hidden" name="returnUrl" value="/Account/Connections#git"/>
+                            <strong>@project.Name repositories</strong>
+                            <div class="repository-options">@foreach (var repository in connection.Repositories) { <label class="check"><input type="checkbox" name="repositoryIds" value="@repository.Id" checked="@(selected.Contains(repository.Id))"/> @repository.FullName <small>@(repository.IsPrivate ? "private" : "public")</small></label> }</div>
+                            <button class="secondary">Save repositories</button>
+                        </form>
+                    }
+                </details>
+            }
+            @foreach (var project in projects)
+            {
+                var mapped = projectRepositories.Where(x => x.ProjectId == project.Id).Select(x => x.RepositoryId).ToHashSet();
+                var choices = gitConnections.SelectMany(x => x.Repositories).Where(x => mapped.Contains(x.Id)).ToList();
+                <form asp-controller="GitHub" asp-action="SetResultsRepository" method="post" class="create-box form-grid wizard-destination"><input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="returnUrl" value="/Account/Connections#git"/><label>@project.Name result destination<select name="repositoryId"><option value="">Local project results folder</option>@foreach (var repository in choices) { <option value="@repository.Id" selected="@(project.ResultsRepositoryId == repository.Id)">@repository.FullName</option> }</select></label><button>Save destination</button></form>
+            }
         }
+        <details class="wizard-add-form" open="@(!gitConnections.Any())"><summary>＋ Connect another Git provider</summary>
         <form asp-controller="GitHub" asp-action="ConnectToken" method="post" class="form-grid">
             <input type="hidden" name="returnUrl" value="/Account/Connections#git" />
             <label>Provider<select name="provider" data-git-provider data-icon-select>@foreach (var provider in GitProviders.All) { <option value="@provider">@provider</option> }</select></label>
@@ -76,8 +111,9 @@
             <label class="wide">Access token or Git password<input name="token" type="password" required autocomplete="off" spellcheck="false" /></label>
             <div class="wide provider-links" data-git-provider-links></div>
             <p class="wide form-help">Credentials are encrypted before storage. Add another provider by submitting this form again.</p>
-            <div class="wide wizard-section-actions"><button>Connect Git provider</button><a class="button secondary" href="#storage">Skip Git / continue to storage →</a></div>
+            <div class="wide wizard-section-actions"><button>Connect Git provider</button><a class="button secondary" href="#storage" data-collapse-add-form>Skip Git / continue to storage →</a></div>
         </form>
+        </details>
         @if (GitHub.IsConfigured)
         {
             <div class="configuration-note"><strong>GitHub App available.</strong> <a asp-controller="GitHub" asp-action="Connect" asp-route-returnUrl="/Account/Connections#git">Authorize the configured GitHub App</a></div>
@@ -91,8 +127,9 @@
         </div>
         @if (storageConnections.Any())
         {
-            <div class="wizard-connections">@foreach (var connection in storageConnections) { <span class="pill">@connection.Provider · @connection.Name</span> }</div>
+            <div class="connection-list wizard-added-connections">@foreach (var connection in storageConnections) { <details class="connection-card"><summary><span class="status @(connection.IsEnabled ? "online" : "")"></span><div><h3>@connection.Name</h3><p>@connection.Provider · @connection.Bucket</p></div><span class="pill">Storage connected</span></summary><div class="connection-meta"><span>@(string.IsNullOrWhiteSpace(connection.Endpoint) ? connection.Region : connection.Endpoint)</span><span>Prefix: @connection.Prefix</span></div></details> }</div>
         }
+        <details class="wizard-add-form" open="@(!storageConnections.Any())"><summary>＋ Add another storage connection</summary>
         <form asp-controller="Manage" asp-action="CreateStorageConnection" method="post" class="form-grid" data-storage-connection-form>
             <input type="hidden" name="returnUrl" value="/Account/Connections#storage" />
             <label>Provider<select name="provider" data-storage-provider data-icon-select>@foreach (var provider in ObjectStorageProviders.All) { <option value="@provider" data-default-region="@ObjectStorageProviders.DefaultRegion(provider)" data-endpoint-required="@ObjectStorageProviders.EndpointIsRequired(provider).ToString().ToLowerInvariant()" data-kind="@(ObjectStorageProviders.IsAzure(provider) ? "azure" : ObjectStorageProviders.IsBunny(provider) ? "bunny" : "s3")" data-session="@ObjectStorageProviders.SupportsSessionToken(provider).ToString().ToLowerInvariant()" data-force-path="@ObjectStorageProviders.DefaultForcePathStyle(provider).ToString().ToLowerInvariant()" data-docs="@ObjectStorageProviders.DocumentationUrl(provider)">@provider</option> }</select></label>
@@ -107,8 +144,9 @@
             <label class="check" data-storage-path-style hidden><input type="checkbox" name="forcePathStyle" value="true" /> Force path-style URLs</label>
             <div class="wide provider-links" data-storage-links></div>
             <label class="check"><input type="checkbox" name="isEnabled" value="true" checked /> Make this the active storage connection</label>
-            <div class="wide wizard-section-actions"><button>Add storage connection</button><a class="button secondary" asp-controller="Home" asp-action="Index">Skip storage / finish setup →</a></div>
+            <div class="wide wizard-section-actions"><button>Add storage connection</button><a class="button secondary" asp-controller="Home" asp-action="Index" data-collapse-add-form>Skip storage / finish setup →</a></div>
         </form>
+        </details>
     </section>
 
     <div class="wizard-finish"><div><strong>Ready to start?</strong><span>You can add, test, or change every connection later from the Connections tab.</span></div><a class="button" asp-controller="Home" asp-action="Index">Finish setup →</a></div>

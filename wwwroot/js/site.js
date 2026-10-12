@@ -138,7 +138,10 @@ const createIconSelect = (select, describeOption) => {
   refresh();
   return { refresh, close };
 };
-document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
+function initializeConnectionUi(scope = document) {
+scope.querySelectorAll('[data-ai-connection-form]').forEach(form => {
+  if (form.dataset.connectionUiReady) return;
+  form.dataset.connectionUiReady = 'true';
   const providerSelect = form.querySelector('[data-ai-provider]');
   const baseUrl = form.querySelector('input[name="baseUrl"]');
   const modelInput = form.querySelector('[data-ai-model-value]');
@@ -280,7 +283,9 @@ document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
   updateProvider();
 });
 
-document.querySelectorAll('[data-ai-load-saved-models]').forEach(button => {
+scope.querySelectorAll('[data-ai-load-saved-models]').forEach(button => {
+  if (button.dataset.connectionUiReady) return;
+  button.dataset.connectionUiReady = 'true';
   button.addEventListener('click', async () => {
     const status = button.parentElement?.querySelector('[data-ai-saved-discovery-status]');
     const list = document.getElementById(button.dataset.targetList);
@@ -308,7 +313,9 @@ document.querySelectorAll('[data-ai-load-saved-models]').forEach(button => {
   });
 });
 
-document.querySelectorAll('[data-storage-connection-form]').forEach(form => {
+scope.querySelectorAll('[data-storage-connection-form]').forEach(form => {
+  if (form.dataset.connectionUiReady) return;
+  form.dataset.connectionUiReady = 'true';
   const provider = form.querySelector('[data-storage-provider]');
   const endpoint = form.querySelector('[data-storage-endpoint]');
   const endpointInput = endpoint?.querySelector('input');
@@ -359,7 +366,9 @@ document.querySelectorAll('[data-storage-connection-form]').forEach(form => {
   updateStorageProvider();
 });
 
-document.querySelectorAll('[data-git-provider]').forEach(select => {
+scope.querySelectorAll('[data-git-provider]').forEach(select => {
+  if (select.dataset.connectionUiReady) return;
+  select.dataset.connectionUiReady = 'true';
   const links = select.closest('form')?.querySelector('[data-git-provider-links]');
   const updateGitProviderLinks = () => {
     if (!links) return;
@@ -391,7 +400,9 @@ document.querySelectorAll('[data-git-provider]').forEach(select => {
   updateGitProviderLinks();
 });
 
-document.querySelectorAll('[data-model-capability]').forEach(checkbox => {
+scope.querySelectorAll('[data-model-capability]').forEach(checkbox => {
+  if (checkbox.dataset.connectionUiReady) return;
+  checkbox.dataset.connectionUiReady = 'true';
   checkbox.addEventListener('change', async () => {
     checkbox.disabled = true;
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
@@ -406,6 +417,63 @@ document.querySelectorAll('[data-model-capability]').forEach(checkbox => {
     } catch (error) { checkbox.checked = !checkbox.checked; alert(error.message); }
     finally { checkbox.disabled = false; }
   });
+});
+}
+
+initializeConnectionUi();
+
+document.addEventListener('click', event => {
+  const link = event.target.closest('[data-collapse-add-form]');
+  if (!link) return;
+  const section = link.closest('.wizard-connection-section');
+  (section || link.closest('[data-connection-workspace]'))?.querySelectorAll('.wizard-add-form').forEach(details => details.removeAttribute('open'));
+});
+
+document.addEventListener('submit', async event => {
+  const form = event.target.closest('[data-connection-workspace] form[method="post"]');
+  if (!form || form.dataset.ajaxBypass === 'true' || event.defaultPrevented) return;
+  event.preventDefault();
+  const workspace = form.closest('[data-connection-workspace]');
+  const workspaceName = workspace?.dataset.connectionWorkspace;
+  const submitter = event.submitter;
+  const button = submitter instanceof HTMLButtonElement ? submitter : form.querySelector('button[type="submit"], button:not([type])');
+  const originalLabel = button?.textContent;
+  if (button) { button.disabled = true; button.textContent = 'Saving…'; }
+  workspace?.setAttribute('aria-busy', 'true');
+  try {
+    const body = new FormData(form);
+    if (submitter?.name) body.set(submitter.name, submitter.value);
+    const response = await fetch(form.action, { method: 'POST', body, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    const html = await response.text();
+    if (!response.ok) throw new Error(`The action could not be completed (${response.status}).`);
+    let nextDocument = new DOMParser().parseFromString(html, 'text/html');
+    let nextWorkspace = nextDocument.querySelector(`[data-connection-workspace="${CSS.escape(workspaceName)}"]`);
+    if (!nextWorkspace) {
+      const refreshUrl = workspaceName === 'wizard' ? '/Account/Connections' : '/';
+      const refreshResponse = await fetch(refreshUrl, { credentials: 'same-origin', cache: 'no-store' });
+      if (!refreshResponse.ok) throw new Error('The updated connection details could not be loaded.');
+      nextDocument = new DOMParser().parseFromString(await refreshResponse.text(), 'text/html');
+      nextWorkspace = nextDocument.querySelector(`[data-connection-workspace="${CSS.escape(workspaceName)}"]`);
+    }
+    if (!nextWorkspace) throw new Error('The updated connection details could not be loaded.');
+    const notice = nextDocument.querySelector('[data-auto-dismiss-notice] span')?.textContent?.trim();
+    workspace.replaceChildren(...nextWorkspace.childNodes);
+    initializeConnectionUi(workspace);
+    if (notice) {
+      const status = document.createElement('div');
+      status.className = 'notice connection-ajax-notice'; status.setAttribute('role', 'status'); status.textContent = notice;
+      workspace.prepend(status);
+      setTimeout(() => status.remove(), 7000);
+    }
+  } catch (error) {
+    const status = document.createElement('div');
+    status.className = 'error connection-ajax-notice'; status.setAttribute('role', 'alert'); status.textContent = error.message || 'The action could not be completed.';
+    workspace?.querySelector('.connection-ajax-notice')?.remove();
+    workspace?.prepend(status);
+  } finally {
+    workspace?.removeAttribute('aria-busy');
+    if (button?.isConnected) { button.disabled = false; button.textContent = originalLabel; }
+  }
 });
 
 document.addEventListener('click', event => {

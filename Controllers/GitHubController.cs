@@ -134,7 +134,7 @@ public sealed class GitHubController(
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> Refresh(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> Refresh(Guid id, string? returnUrl, CancellationToken cancellationToken)
     {
         var current = await store.ReadAsync(state => state.GitHubConnections.FirstOrDefault(x => x.Id == id));
         if (current is null) return NotFound();
@@ -160,17 +160,17 @@ public sealed class GitHubController(
                 RemoveUnavailableMappings(state, connection);
                 return true;
             });
-            return Back($"{current.Provider} repositories refreshed.", "/#connections");
+            return Back($"{current.Provider} repositories refreshed.", returnUrl);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Could not refresh GitHub connection {ConnectionId}", id);
-            return Back($"Could not refresh the {current.Provider} connection: {ex.Message}", "/#connections");
+            return Back($"Could not refresh the {current.Provider} connection: {ex.Message}", returnUrl);
         }
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> SetProjectRepositories(Guid projectId, Guid connectionId, long[]? repositoryIds)
+    public async Task<IActionResult> SetProjectRepositories(Guid projectId, Guid connectionId, long[]? repositoryIds, string? returnUrl)
     {
         await store.UpdateAsync(state =>
         {
@@ -183,11 +183,11 @@ public sealed class GitHubController(
             CleanupResultRepositories(state);
             return true;
         });
-        return Back("Project repositories updated.", "/#connections");
+        return Back("Project repositories updated.", returnUrl);
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> SetResultsRepository(Guid projectId, long? repositoryId)
+    public async Task<IActionResult> SetResultsRepository(Guid projectId, long? repositoryId, string? returnUrl)
     {
         await store.UpdateAsync(state =>
         {
@@ -197,7 +197,7 @@ public sealed class GitHubController(
             if (allowed) project.ResultsRepositoryId = repositoryId;
             return allowed;
         });
-        return Back(repositoryId is null ? "Results will remain local." : "Results repository updated.", "/#connections");
+        return Back(repositoryId is null ? "Results will remain local." : "Results repository updated.", returnUrl);
     }
 
     [HttpPost, ValidateAntiForgeryToken]
