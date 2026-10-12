@@ -19,7 +19,6 @@
         <div class="explorer-navigation">
             @if (!string.IsNullOrEmpty(Model.Path)) { <a class="button secondary parent-folder-button file-drop-target" data-file-nav="true" data-drop-path="@parent" asp-action="Index" asp-route-projectId="@Model.Project.Id" asp-route-path="@parent">← Parent folder</a> }
             else { <span class="button secondary parent-folder-button disabled" aria-disabled="true">← Parent folder</span> }
-            <a class="button secondary root-folder-button file-drop-target" data-file-nav="true" data-drop-path="" asp-action="Index" asp-route-projectId="@Model.Project.Id" asp-route-path="">⌂ Root</a>
             <nav class="folder-breadcrumbs" aria-label="Current folder path">
                 <a data-file-nav="true" data-drop-path="" class="file-drop-target" asp-action="Index" asp-route-projectId="@Model.Project.Id" asp-route-path="">Root</a>
                 @for (var index = 0; index < pathParts.Length; index++)

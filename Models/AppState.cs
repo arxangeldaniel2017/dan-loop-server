@@ -2,7 +2,7 @@ namespace DanLoopServer.Models;
 
 public sealed class AppState
 {
-    public int Version { get; set; } = 11;
+    public int Version { get; set; } = 12;
     public List<AppUser> Users { get; set; } = [];
     public List<Project> Projects { get; set; } = [];
     public List<LoopDefinition> Loops { get; set; } = [];

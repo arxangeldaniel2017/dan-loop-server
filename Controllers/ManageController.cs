@@ -76,10 +76,15 @@ public sealed class ManageController(StateStore store, PasswordService passwords
                 }
                 state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, Level = MessageLevels.Info, Text = $"Loop '{current.Name}' stopped. {stoppedJobIds.Count} unfinished execution(s) were cancelled." });
             }
-            return new { current.IsEnabled, JobIds = stoppedJobIds };
+            var projectStillRunning = state.Loops.Any(item => item.ProjectId == current.ProjectId && item.IsEnabled);
+            return new { current.IsEnabled, current.ProjectId, ProjectStillRunning = projectStillRunning, JobIds = stoppedJobIds };
         });
         foreach (var jobId in result.JobIds) cancellations.Cancel(jobId);
-        if (!result.IsEnabled) await plans.CancelJobsAsync(result.JobIds, "Execution stopped because the recurring loop was stopped.");
+        if (!result.IsEnabled)
+        {
+            await plans.CancelJobsAsync(result.JobIds, "Execution stopped because the recurring loop was stopped.");
+            if (!result.ProjectStillRunning) await plans.PauseProjectAsync(result.ProjectId, "Execution plan paused because all recurring loops for this project are stopped.");
+        }
         return Back(result.IsEnabled ? "Loop enabled." : $"Loop stopped. {result.JobIds.Count} unfinished execution(s) cancelled.");
     }
 

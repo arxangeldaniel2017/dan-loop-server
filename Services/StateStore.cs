@@ -160,6 +160,28 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                     }
                     _state.Version = 11;
                 }
+                if (_state.Version < 12)
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    foreach (var plan in _state.ExecutionPlans)
+                    {
+                        var projectHasEnabledLoop = _state.Loops.Any(loop => loop.ProjectId == plan.ProjectId && loop.IsEnabled);
+                        if (projectHasEnabledLoop) continue;
+                        foreach (var step in plan.Steps.Where(step => step.Status is PlanStepStatuses.Running or PlanStepStatuses.Retrying))
+                        {
+                            var attempt = step.Attempts.LastOrDefault(item => item.Status is PlanStepStatuses.Running or PlanStepStatuses.Retrying);
+                            if (attempt is not null)
+                            {
+                                attempt.Status = PlanStepStatuses.Cancelled;
+                                attempt.Summary = "Execution plan paused because all recurring loops for this project are stopped.";
+                                attempt.CompletedAt ??= now;
+                            }
+                            step.Status = PlanStepStatuses.Paused;
+                            plan.UpdatedAt = now;
+                        }
+                    }
+                    _state.Version = 12;
+                }
                 await SaveUnsafeAsync();
                 return;
             }

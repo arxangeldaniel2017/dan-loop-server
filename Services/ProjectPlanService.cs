@@ -133,6 +133,27 @@ public sealed class ProjectPlanService(StateStore store, WorkspaceService worksp
         return changed;
     });
 
+    public Task PauseProjectAsync(Guid projectId, string reason) => store.UpdateAsync(state =>
+    {
+        var plan = state.ExecutionPlans.FirstOrDefault(item => item.ProjectId == projectId);
+        if (plan is null) return false;
+        var changed = false;
+        foreach (var step in plan.Steps.Where(item => item.Status is PlanStepStatuses.Running or PlanStepStatuses.Retrying))
+        {
+            var attempt = step.Attempts.LastOrDefault(item => item.Status is PlanStepStatuses.Running or PlanStepStatuses.Retrying);
+            if (attempt is not null)
+            {
+                attempt.Status = PlanStepStatuses.Cancelled;
+                attempt.Summary = reason;
+                attempt.CompletedAt ??= DateTimeOffset.UtcNow;
+            }
+            step.Status = PlanStepStatuses.Paused;
+            changed = true;
+        }
+        if (changed) plan.UpdatedAt = DateTimeOffset.UtcNow;
+        return changed;
+    });
+
     public Task SetRetryLimitAsync(Guid projectId, Guid stepId, int? retryLimit) => store.UpdateAsync(state =>
     {
         var step = state.ExecutionPlans.First(item => item.ProjectId == projectId).Steps.First(item => item.Id == stepId);
