@@ -190,7 +190,7 @@ document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
     body.append('apiKey', apiKeyInput?.value || '');
     body.append('authenticationType', authenticationSelect?.value || provider.authenticationType || 'Bearer token');
     body.append('apiKeyHeaderName', keyHeaderInput?.value || provider.apiKeyHeaderName || 'Authorization');
-    body.append('forceRefresh', 'true');
+    body.append('forceRefresh', 'false');
     const token = form.querySelector('input[name="__RequestVerificationToken"]')?.value || document.querySelector('input[name="__RequestVerificationToken"]')?.value;
     if (token) body.append('__RequestVerificationToken', token);
     try {
@@ -231,7 +231,7 @@ document.querySelectorAll('[data-ai-load-saved-models]').forEach(button => {
     body.append('connectionId', button.dataset.connectionId || '');
     body.append('providerId', button.dataset.providerId || '');
     body.append('baseUrl', button.dataset.baseUrl || '');
-    body.append('forceRefresh', 'true');
+    body.append('forceRefresh', 'false');
     const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
     if (token) body.append('__RequestVerificationToken', token);
     button.disabled = true;

@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using DanLoopServer.Models;
 using Microsoft.AspNetCore.DataProtection;
@@ -17,7 +19,8 @@ public sealed class AiModelDiscoveryService(HttpClient http, IDataProtectionProv
         baseUrl = (string.IsNullOrWhiteSpace(baseUrl) ? provider.BaseUrl : baseUrl).TrimEnd('/');
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             throw new InvalidOperationException("Enter a valid provider endpoint before loading models.");
-        var cacheKey = $"{provider.Id}|{baseUrl}";
+        var credentialFingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(apiKey)))[..16];
+        var cacheKey = $"{provider.Id}|{baseUrl}|{credentialFingerprint}";
         if (!forceRefresh && _cache.TryGetValue(cacheKey, out var cached) && DateTimeOffset.UtcNow - cached.CreatedAt < CacheDuration)
             return Merge(provider, cached.Models, true);
         var model = new RemoteModel { ProviderId = provider.Id, BaseUrl = baseUrl };
