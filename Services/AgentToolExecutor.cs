@@ -47,7 +47,15 @@ public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore sto
         if (settings.AllowFileWrite) available.AddRange(["write project files", "replace text in project files"]);
         if (settings.AllowGitHubPublish) available.Add("queue AI-created files for background GitHub publishing; publish selected files immediately only when explicitly requested");
         if (objectStorage.IsEnabled) available.Add("inspect and synchronize configured S3-compatible project storage");
-        var project = await store.ReadAsync(state => state.Projects.First(item => item.Id == projectId));
+        var context = await store.ReadAsync(state => new
+        {
+            Project = state.Projects.First(item => item.Id == projectId),
+            GenerationCapabilities = AiCapabilities.All.Where(capability => capability is AiCapabilities.Image or AiCapabilities.Audio or AiCapabilities.Video or AiCapabilities.Files)
+                .Where(capability => state.Models.Any(model => model.IsEnabled && AiCapabilities.Supports(model, capability))).ToList()
+        });
+        if (settings.AllowFileWrite && context.GenerationCapabilities.Count > 0)
+            available.Add($"generate project assets with provider fallback ({string.Join(", ", context.GenerationCapabilities)})");
+        var project = context.Project;
         return $"""
                Project workspace: logical root `/` (project-relative paths only; this is not the server root).
                Top-level project entries: {string.Join(", ", entries).NullIfEmpty() ?? "(empty)"}

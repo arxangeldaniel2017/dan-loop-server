@@ -41,6 +41,16 @@ public sealed class AiGenerationService(HttpClient http, IDataProtectionProvider
     public async Task<string> TestAsync(RemoteModel model, CancellationToken cancellationToken)
     {
         var key = RevealKey(model);
+        if (model.ProviderId.Equals("fal", StringComparison.OrdinalIgnoreCase))
+        {
+            using var validation = new HttpRequestMessage(HttpMethod.Post, model.BaseUrl.TrimEnd('/') + "/" + model.ModelId.TrimStart('/')) { Content = JsonContent.Create(new { }) };
+            AiRequestAuthentication.Apply(validation, model, key);
+            using var validationResponse = await http.SendAsync(validation, cancellationToken);
+            var validationBody = await validationResponse.Content.ReadAsStringAsync(cancellationToken);
+            if ((int)validationResponse.StatusCode is 400 or 422) return "Connection authentication succeeded; the provider rejected the intentionally empty test input as expected.";
+            if (!validationResponse.IsSuccessStatusCode) throw Error(validationResponse, validationBody);
+            return "Connection and native generation endpoint request succeeded.";
+        }
         var (url, method) = model.ProviderId.ToLowerInvariant() switch
         {
             "replicate" => (model.BaseUrl.TrimEnd('/') + "/account", HttpMethod.Get),

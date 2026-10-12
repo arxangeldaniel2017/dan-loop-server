@@ -39,6 +39,7 @@
         <article data-tool-policy data-requires="enabled,allowFileRead"><code>read_file</code><strong>Read any project file</strong><p>Returns text directly and binary files as bounded Base64 chunks. Absolute paths and protected internal folders are rejected.</p></article>
         <article data-tool-policy data-requires="enabled,allowFileWrite"><code>write_file</code><strong>Write project file</strong><p>Creates or replaces one project text file and backs up existing content first.</p></article>
         <article data-tool-policy data-requires="enabled,allowFileWrite"><code>replace_in_file</code><strong>Replace text in project file</strong><p>Changes one exact, unambiguous text occurrence without executing a script or command.</p></article>
+        <article data-tool-policy data-requires="enabled,allowFileWrite"><code>generate_asset</code><strong>Generate a project asset</strong><p>Uses enabled image, audio, video, or file-generation connections with priority fallback, then saves the result inside the project.</p></article>
         <article data-tool-policy data-requires="enabled,allowGitHubPublish"><code>publish_project_files</code><strong>Publish through GitHub</strong><p>Commits selected files through the connected GitHub API. It uses no shell, Git executable, or local repository.</p></article>
     </div>
     <div class="allowed-tools-empty" data-allowed-tools-empty hidden><strong>AI file tools are disabled</strong><p>Jobs can still ask the model for text, but no project workspace tools will be sent to it.</p></div>

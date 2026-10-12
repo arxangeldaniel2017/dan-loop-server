@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace DanLoopServer.Controllers;
 
 [Authorize]
-public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, WorkspaceService workspace, GitHubService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations, S3ObjectStorage objectStorage) : Controller
+public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, AiModelDiscoveryService modelDiscovery, WorkspaceService workspace, GitHubService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations, S3ObjectStorage objectStorage) : Controller
 {
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId)
@@ -239,6 +239,29 @@ public sealed class ManageController(StateStore store, PasswordService passwords
         {
             await store.UpdateAsync(state => { var current = state.Jobs.First(x => x.Id == id); current.ResultsPushError = ex.Message; state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = MessageLevels.Warning, Text = $"GitHub result push failed: {ex.Message}" }); return true; });
             return Back("GitHub push failed: " + ex.Message);
+        }
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> DiscoverModels(string providerId, string baseUrl, string? apiKey, string? authenticationType,
+        string? apiKeyHeaderName, Guid? connectionId, bool forceRefresh = false, CancellationToken cancellationToken = default)
+    {
+        var input = await store.ReadAsync(state => new
+        {
+            Provider = state.AiProviderCatalog.FirstOrDefault(item => item.Id.Equals(providerId ?? "", StringComparison.OrdinalIgnoreCase)),
+            Connection = connectionId is Guid id ? state.Models.FirstOrDefault(item => item.Id == id) : null
+        });
+        if (input.Provider is null) return BadRequest(new { message = "Unknown AI provider." });
+        try
+        {
+            var result = input.Connection is null
+                ? await modelDiscovery.DiscoverAsync(input.Provider, baseUrl ?? "", apiKey ?? "", authenticationType, apiKeyHeaderName, forceRefresh, cancellationToken)
+                : await modelDiscovery.DiscoverSavedAsync(input.Provider, input.Connection, forceRefresh, cancellationToken);
+            return Ok(new { result.Models, result.DiscoveredCount, result.Message, result.Cached });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return BadRequest(new { message = ex.Message });
         }
     }
 

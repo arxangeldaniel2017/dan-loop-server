@@ -47,6 +47,8 @@ The server loads its provider/model defaults from `Data/ai-connections.json` and
 
 Each AI connection can be assigned Planner, Coder, Orchestrator, Tool calling, Generator, Image, Audio, Video, and Files capabilities. Jobs select enabled connections by capability and priority. A failed connection is recorded and the job is re-queued with the next eligible connection. When the user has not selected any capabilities, the catalog defaults (or safe model-name inference for custom models) are used.
 
+The connection runtime supports OpenAI-compatible chat/tool APIs, native Anthropic Messages tool use, and native asset generation through Replicate, fal.ai, Stability AI, and ElevenLabs. Hosted services such as RunPod, Modal, Vast.ai, Lambda, CoreWeave, GMI Cloud, Lepton AI, Paperspace, Baseten, Databricks, DigitalOcean Gradient, Vertex AI, Azure Foundry, OCI, and watsonx use the deployment's user-supplied compatible endpoint. The `generate_asset` project tool selects enabled Image, Audio, Video, or Files connections by priority, falls back after provider errors, saves the result within the project workspace, and queues the generated file for normal background storage and GitHub synchronization.
+
 The current execution client uses the OpenAI-compatible `POST /chat/completions` API. For a model running directly on the Mac, use a base URL reachable from Docker, for example:
 
 - Ollama OpenAI compatibility: `http://host.docker.internal:11434/v1`

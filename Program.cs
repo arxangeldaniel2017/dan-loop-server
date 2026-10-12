@@ -36,6 +36,7 @@ builder.Services.AddSingleton<ProjectPlanService>();
 builder.Services.AddSingleton<JobCancellationRegistry>();
 builder.Services.AddSingleton<AgentToolExecutor>();
 builder.Services.AddHttpClient<RemoteModelClient>(client => client.Timeout = TimeSpan.FromMinutes(5));
+builder.Services.AddHttpClient<AiModelDiscoveryService>(client => client.Timeout = TimeSpan.FromSeconds(45));
 builder.Services.AddHttpClient<AiGenerationService>(client => client.Timeout = TimeSpan.FromMinutes(10));
 builder.Services.AddHttpClient<AgentRuntimeClient>(client => client.Timeout = TimeSpan.FromMinutes(15));
 builder.Services.AddSingleton<AgentRuntimeService>();
