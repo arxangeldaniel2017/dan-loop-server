@@ -108,6 +108,8 @@ document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
   const keyHeader = form.querySelector('[data-ai-key-header]');
   const keyHeaderInput = keyHeader?.querySelector('input');
   const links = form.querySelector('[data-provider-links]');
+  const loadModels = form.querySelector('[data-ai-load-models]');
+  const discoveryStatus = form.querySelector('[data-ai-discovery-status]');
   let providerPicker;
   let modelPicker;
   const updateCapabilities = (provider) => {
@@ -175,10 +177,41 @@ document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
     if (modelInput) modelInput.value = custom ? (customModelInput?.value.trim() || '') : (modelSelect?.value || '');
     updateCapabilities(aiCatalog.find(item => item.id === providerSelect?.value));
   };
+  const discoverModels = async () => {
+    const provider = aiCatalog.find(item => item.id === providerSelect?.value);
+    if (!provider || !loadModels) return;
+    loadModels.disabled = true;
+    const originalLabel = loadModels.textContent;
+    loadModels.textContent = 'Loading…';
+    if (discoveryStatus) { discoveryStatus.textContent = 'Contacting provider…'; discoveryStatus.classList.remove('error'); }
+    const body = new FormData();
+    body.append('providerId', provider.id);
+    body.append('baseUrl', baseUrl?.value || provider.baseUrl || '');
+    body.append('apiKey', apiKeyInput?.value || '');
+    body.append('authenticationType', authenticationSelect?.value || provider.authenticationType || 'Bearer token');
+    body.append('apiKeyHeaderName', keyHeaderInput?.value || provider.apiKeyHeaderName || 'Authorization');
+    body.append('forceRefresh', 'true');
+    const token = form.querySelector('input[name="__RequestVerificationToken"]')?.value || document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    if (token) body.append('__RequestVerificationToken', token);
+    try {
+      const response = await fetch('/Manage/DiscoverModels', { method: 'POST', body, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || 'Models could not be loaded.');
+      provider.models = Array.isArray(result.models) ? result.models : provider.models;
+      updateProvider();
+      if (discoveryStatus) discoveryStatus.textContent = result.message || 'Live models loaded.';
+    } catch (error) {
+      if (discoveryStatus) { discoveryStatus.textContent = error.message; discoveryStatus.classList.add('error'); }
+    } finally {
+      loadModels.disabled = false;
+      loadModels.textContent = originalLabel;
+    }
+  };
   providerSelect?.addEventListener('change', updateProvider);
   modelSelect?.addEventListener('change', updateModel);
   customModelInput?.addEventListener('input', updateModel);
   authenticationSelect?.addEventListener('change', () => updateAuthentication(aiCatalog.find(item => item.id === providerSelect?.value)));
+  loadModels?.addEventListener('click', discoverModels);
   providerPicker = createIconSelect(providerSelect, option => {
     const provider = aiCatalog.find(item => item.id === option.value);
     return { label: option.textContent, meta: provider?.category || '', icon: providerIconUrl(provider) };
@@ -188,6 +221,34 @@ document.querySelectorAll('[data-ai-connection-form]').forEach(form => {
     return { label: option.textContent, meta: option.value && option.value !== '__custom__' ? option.value : '', icon: providerIconUrl(provider) };
   });
   updateProvider();
+});
+
+document.querySelectorAll('[data-ai-load-saved-models]').forEach(button => {
+  button.addEventListener('click', async () => {
+    const status = button.parentElement?.querySelector('[data-ai-saved-discovery-status]');
+    const list = document.getElementById(button.dataset.targetList);
+    const body = new FormData();
+    body.append('connectionId', button.dataset.connectionId || '');
+    body.append('providerId', button.dataset.providerId || '');
+    body.append('baseUrl', button.dataset.baseUrl || '');
+    body.append('forceRefresh', 'true');
+    const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+    if (token) body.append('__RequestVerificationToken', token);
+    button.disabled = true;
+    if (status) { status.textContent = 'Loading…'; status.classList.remove('error'); }
+    try {
+      const response = await fetch('/Manage/DiscoverModels', { method: 'POST', body, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || 'Models could not be loaded.');
+      if (list) {
+        list.replaceChildren();
+        (result.models || []).forEach(model => { const option = document.createElement('option'); option.value = model.id; option.textContent = model.name; list.append(option); });
+      }
+      if (status) status.textContent = `${result.discoveredCount || 0} live models loaded. Open Edit to choose one.`;
+    } catch (error) {
+      if (status) { status.textContent = error.message; status.classList.add('error'); }
+    } finally { button.disabled = false; }
+  });
 });
 
 document.querySelectorAll('[data-storage-connection-form]').forEach(form => {

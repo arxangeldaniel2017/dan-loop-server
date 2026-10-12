@@ -91,7 +91,7 @@ public sealed class AiModelDiscoveryService(HttpClient http, IDataProtectionProv
         {
             if (string.IsNullOrWhiteSpace(id)) return;
             id = id.Trim(); if (id.StartsWith("models/", StringComparison.OrdinalIgnoreCase)) id = id[7..];
-            models.Add(new AiModelCatalogItem { Id = id, Name = string.IsNullOrWhiteSpace(name) ? FriendlyName(id) : name.Trim(), Capabilities = AiConnectionCatalogService.SuggestedCapabilities([provider], id) });
+            models.Add(new AiModelCatalogItem { Id = id, Name = string.IsNullOrWhiteSpace(name) ? FriendlyName(id) : name.Trim(), Capabilities = AiConnectionCatalogService.SuggestedCapabilities([provider], provider.Id, id) });
         }
     }
 
