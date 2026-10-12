@@ -2,7 +2,7 @@ namespace DanLoopServer.Models;
 
 public sealed class AppState
 {
-    public int Version { get; set; } = 12;
+    public int Version { get; set; } = 14;
     public List<AppUser> Users { get; set; } = [];
     public List<Project> Projects { get; set; } = [];
     public List<LoopDefinition> Loops { get; set; } = [];
@@ -11,6 +11,7 @@ public sealed class AppState
     public List<AiProviderCatalogItem> AiProviderCatalog { get; set; } = [];
     public List<ProjectPermission> Permissions { get; set; } = [];
     public List<GitHubConnection> GitHubConnections { get; set; } = [];
+    public List<ObjectStorageConnection> ObjectStorageConnections { get; set; } = [];
     public List<ProjectRepository> ProjectRepositories { get; set; } = [];
     public List<Conversation> Conversations { get; set; } = [];
     public List<PendingUpload> PendingUploads { get; set; } = [];
@@ -189,6 +190,8 @@ public sealed class RemoteModel
     public string BaseUrl { get; set; } = "";
     public string ModelId { get; set; } = "";
     public string ProtectedApiKey { get; set; } = "";
+    public string AuthenticationType { get; set; } = AiAuthenticationTypes.BearerToken;
+    public string ApiKeyHeaderName { get; set; } = "Authorization";
     public bool IsEnabled { get; set; } = true;
     public int Priority { get; set; } = 100;
     public List<string> Capabilities { get; set; } = [];
@@ -204,10 +207,26 @@ public sealed class AiProviderCatalogItem
     public string Name { get; set; } = "";
     public string BaseUrl { get; set; } = "";
     public bool RequiresBaseUrl { get; set; }
+    public string AuthenticationType { get; set; } = AiAuthenticationTypes.BearerToken;
+    public string ApiKeyHeaderName { get; set; } = "Authorization";
+    public bool ApiKeyRequired { get; set; } = true;
+    public bool AllowsAuthenticationSelection { get; set; }
     public string ApiKeyUrl { get; set; } = "";
     public string DocumentationUrl { get; set; } = "";
     public string PricingUrl { get; set; } = "";
     public List<AiModelCatalogItem> Models { get; set; } = [];
+}
+
+public static class AiAuthenticationTypes
+{
+    public const string BearerToken = "Bearer token";
+    public const string ApiKeyHeader = "API key header";
+    public const string None = "No authentication";
+    public static readonly string[] All = [BearerToken, ApiKeyHeader, None];
+
+    public static string Normalize(string? value) => All.Contains(value, StringComparer.OrdinalIgnoreCase)
+        ? All.First(item => item.Equals(value, StringComparison.OrdinalIgnoreCase))
+        : BearerToken;
 }
 
 public sealed class AiModelCatalogItem
@@ -265,6 +284,34 @@ public static class GitHubAuthenticationTypes
 {
     public const string App = "App";
     public const string Token = "Token";
+}
+
+public sealed class ObjectStorageConnection
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "Object storage";
+    public string Provider { get; set; } = ObjectStorageProviders.AmazonS3;
+    public string Endpoint { get; set; } = "";
+    public string Region { get; set; } = "us-east-1";
+    public string Bucket { get; set; } = "";
+    public string Prefix { get; set; } = "dan-loop/projects";
+    public string ProtectedAccessKey { get; set; } = "";
+    public string ProtectedSecretKey { get; set; } = "";
+    public string ProtectedSessionToken { get; set; } = "";
+    public bool ForcePathStyle { get; set; }
+    public bool IsEnabled { get; set; } = true;
+    public string LastTestStatus { get; set; } = "Not tested";
+    public string LastTestMessage { get; set; } = "";
+    public DateTimeOffset? LastTestedAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public static class ObjectStorageProviders
+{
+    public const string AmazonS3 = "Amazon S3";
+    public const string DigitalOceanSpaces = "DigitalOcean Spaces";
+    public const string S3Compatible = "S3 compatible";
+    public static readonly string[] All = [AmazonS3, DigitalOceanSpaces, S3Compatible];
 }
 
 public sealed class GitHubRepository

@@ -12,11 +12,11 @@
 @foreach (var plan in plans)
 {
     var project = Model.VisibleProjects.First(item => item.Id == plan.ProjectId);
-    <article class="plan-board">
-        <div class="plan-board-head">
+    <details class="plan-board" data-plan-id="@plan.ProjectId">
+        <summary class="plan-board-head">
             <div><h3>@project.Name</h3><p>@plan.Steps.Count(step => step.Status == PlanStepStatuses.Succeeded) of @plan.Steps.Count steps succeeded · updated @plan.UpdatedAt.ToLocalTime().ToString("g")</p></div>
             <span class="pill">Server managed</span>
-        </div>
+        </summary>
         <div class="plan-step-list">
         @foreach (var step in plan.Steps.OrderBy(item => item.Order))
         {
@@ -51,6 +51,6 @@
             </details>
         }
         </div>
-    </article>
+    </details>
 }
 </div>

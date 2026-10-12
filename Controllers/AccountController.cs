@@ -43,7 +43,7 @@ public sealed class AccountController(StateStore store, PasswordService password
     }
 
     [Authorize(Roles = Roles.Admin), HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> ConfigureModel(string? name, string? modelId, string? baseUrl, string? apiKey, string? providerId, List<string>? capabilities, bool addAnother = false)
+    public async Task<IActionResult> ConfigureModel(string? name, string? modelId, string? baseUrl, string? apiKey, string? providerId, List<string>? capabilities, string? authenticationType, string? apiKeyHeaderName, bool addAnother = false)
     {
         name = name?.Trim() ?? "";
         modelId = modelId?.Trim() ?? "";
@@ -63,16 +63,18 @@ public sealed class AccountController(StateStore store, PasswordService password
         await store.UpdateAsync(state =>
         {
             var provider = string.IsNullOrWhiteSpace(providerId) ? "custom" : providerId.Trim();
-            state.Models.Add(new RemoteModel
+            var model = new RemoteModel
             {
                 Name = name, ProviderId = provider,
                 ModelId = modelId,
                 BaseUrl = baseUrl.TrimEnd('/'),
                 ProtectedApiKey = modelClient.ProtectKey(apiKey ?? ""),
                 IsEnabled = true,
-                Capabilities = (capabilities ?? []).Where(AiCapabilities.All.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                Capabilities = AiConnectionCatalogService.NormalizeSelectedCapabilities(state.AiProviderCatalog, provider, modelId, capabilities),
                 SuggestedCapabilities = AiConnectionCatalogService.SuggestedCapabilities(state.AiProviderCatalog, provider, modelId)
-            });
+            };
+            AiConnectionCatalogService.ApplyProviderAuthentication(state.AiProviderCatalog, model, authenticationType, apiKeyHeaderName);
+            state.Models.Add(model);
             return true;
         });
         return addAnother ? RedirectToAction(nameof(ConfigureModel)) : RedirectToAction("Setup", "GitHub");

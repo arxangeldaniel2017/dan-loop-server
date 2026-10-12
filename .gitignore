@@ -1,6 +1,7 @@
 bin/
 obj/
-data/
+data/*
+!Data/ai-connections.json
 .DS_Store
 *.user
 *.suo

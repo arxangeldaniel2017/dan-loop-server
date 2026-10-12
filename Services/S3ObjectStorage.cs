@@ -4,6 +4,9 @@ using Amazon;
 using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Amazon.S3.Util;
+using DanLoopServer.Models;
+using Microsoft.AspNetCore.DataProtection;
 
 namespace DanLoopServer.Services;
 
@@ -16,63 +19,53 @@ public sealed class S3ObjectStorage : IAsyncDisposable
     private const string ManifestName = ".dan-loop-storage-manifest.json";
     private static readonly string[] InternalFolders = [".downloads", ".git", ".history", ".staging", ".trash"];
     private readonly ILogger<S3ObjectStorage> _logger;
+    private readonly StateStore _store;
+    private readonly IDataProtector _protector;
     private readonly string _root;
-    private readonly string? _bucket;
-    private readonly string _prefix;
-    private readonly IAmazonS3? _client;
+    private string? _bucket;
+    private string _prefix = "dan-loop/projects";
+    private IAmazonS3? _client;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Dictionary<string, StoredFile> _manifest = new(StringComparer.Ordinal);
     private bool _initialized;
 
-    public S3ObjectStorage(IConfiguration configuration, ILogger<S3ObjectStorage> logger)
+    public S3ObjectStorage(IConfiguration configuration, StateStore store, IDataProtectionProvider protectionProvider, ILogger<S3ObjectStorage> logger)
     {
         _logger = logger;
+        _store = store;
+        _protector = protectionProvider.CreateProtector("object-storage-credentials-v1");
         _root = Path.GetFullPath(configuration["Storage:ProjectsPath"] ?? "/data/projects");
-        _bucket = First(configuration["S3:Bucket"], configuration["S3_BUCKET"], configuration["S3_BUCKET_NAME"], configuration["AWS_BUCKET_NAME"], configuration["SPACES_BUCKET"], configuration["SPACES_BUCKET_NAME"]);
-        _prefix = (First(configuration["S3:Prefix"], configuration["S3_PREFIX"], configuration["SPACES_PREFIX"]) ?? "dan-loop/projects").Trim('/');
-        if (_bucket is null) return;
-
-        var endpoint = First(configuration["S3:Endpoint"], configuration["S3_ENDPOINT"], configuration["AWS_ENDPOINT_URL_S3"], configuration["SPACES_ENDPOINT"]);
-        var region = First(configuration["S3:Region"], configuration["S3_REGION"], configuration["AWS_REGION"], configuration["AWS_DEFAULT_REGION"], configuration["SPACES_REGION"])
-                     ?? InferSpacesRegion(endpoint) ?? "us-east-1";
-        var accessKey = First(configuration["S3:AccessKey"], configuration["S3_ACCESS_KEY"], configuration["S3_ACCESS_KEY_ID"], configuration["SPACES_KEY"], configuration["SPACES_ACCESS_KEY"], configuration["SPACES_ACCESS_KEY_ID"], configuration["AWS_ACCESS_KEY_ID"]);
-        var secretKey = First(configuration["S3:SecretKey"], configuration["S3_SECRET_KEY"], configuration["S3_SECRET_ACCESS_KEY"], configuration["SPACES_SECRET"], configuration["SPACES_SECRET_KEY"], configuration["SPACES_SECRET_ACCESS_KEY"], configuration["AWS_SECRET_ACCESS_KEY"]);
-        var sessionToken = First(configuration["S3:SessionToken"], configuration["S3_SESSION_TOKEN"], configuration["AWS_SESSION_TOKEN"]);
-        if ((accessKey is null) != (secretKey is null))
-            throw new InvalidOperationException("S3 object storage requires both access-key and secret-key values.");
-
-        var s3Config = new AmazonS3Config
-        {
-            AuthenticationRegion = region,
-            RegionEndpoint = RegionEndpoint.GetBySystemName(region),
-            ForcePathStyle = ParseBool(First(configuration["S3:ForcePathStyle"], configuration["S3_FORCE_PATH_STYLE"]))
-        };
-        if (endpoint is not null)
-        {
-            s3Config.ServiceURL = NormalizeEndpoint(endpoint);
-            // RegionEndpoint causes the AWS hostname to win over a custom endpoint in some SDK versions.
-            s3Config.RegionEndpoint = null;
-        }
-
-        var credentials = accessKey is null
-            ? null
-            : sessionToken is null
-                ? (AWSCredentials)new BasicAWSCredentials(accessKey, secretKey)
-                : new SessionAWSCredentials(accessKey, secretKey, sessionToken);
-        _client = credentials is not null
-            ? new AmazonS3Client(credentials, s3Config)
-            : new AmazonS3Client(s3Config);
     }
 
     public bool IsEnabled => _client is not null && _bucket is not null;
 
-    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    public string ProtectSecret(string value) => string.IsNullOrWhiteSpace(value) ? "" : _protector.Protect(value.Trim());
+
+    public async Task InitializeAsync(CancellationToken cancellationToken = default) => await RefreshAsync(cancellationToken);
+
+    public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
-        if (!IsEnabled) return;
         Directory.CreateDirectory(_root);
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            var connection = await _store.ReadAsync(state => state.ObjectStorageConnections.FirstOrDefault(item => item.IsEnabled));
+            _client?.Dispose();
+            _client = null;
+            _bucket = null;
+            _prefix = "dan-loop/projects";
+            _manifest = new(StringComparer.Ordinal);
+            _initialized = false;
+            if (connection is null)
+            {
+                _logger.LogInformation("No active saved S3-compatible storage connection; local project storage is active");
+                return;
+            }
+
+            _client = CreateClient(connection);
+            _bucket = connection.Bucket.Trim();
+            _prefix = (string.IsNullOrWhiteSpace(connection.Prefix) ? "dan-loop/projects" : connection.Prefix).Trim('/');
+            await EnsureBucketAsync(_client, _bucket, connection.Region, cancellationToken);
             _manifest = await ReadManifestAsync(cancellationToken);
             if (_manifest.Count == 0)
                 _manifest = await DiscoverRemoteFilesAsync(cancellationToken);
@@ -86,17 +79,68 @@ public sealed class S3ObjectStorage : IAsyncDisposable
             }
             _initialized = true;
             await SyncUnsafeAsync(cancellationToken);
-            _logger.LogInformation("S3-compatible project storage enabled for bucket {Bucket} with prefix {Prefix}", _bucket, _prefix);
+            _logger.LogInformation("Saved S3-compatible project storage enabled for bucket {Bucket} with prefix {Prefix}", _bucket, _prefix);
         }
         catch (Exception ex)
         {
-            _logger.LogCritical(ex, "Could not initialize configured S3-compatible project storage");
-            throw;
+            _logger.LogError(ex, "Could not initialize the active saved S3-compatible storage connection; local storage remains available");
+            _client?.Dispose();
+            _client = null;
+            _bucket = null;
+            _initialized = false;
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    public async Task<string> TestAsync(ObjectStorageConnection connection, CancellationToken cancellationToken)
+    {
+        using var client = CreateClient(connection);
+        await EnsureBucketAsync(client, connection.Bucket.Trim(), connection.Region, cancellationToken);
+        var result = await client.ListObjectsV2Async(new ListObjectsV2Request { BucketName = connection.Bucket.Trim(), MaxKeys = 1 }, cancellationToken);
+        return $"Connected to bucket '{connection.Bucket.Trim()}'.";
+    }
+
+    private IAmazonS3 CreateClient(ObjectStorageConnection connection)
+    {
+        var endpoint = string.IsNullOrWhiteSpace(connection.Endpoint) ? null : connection.Endpoint.Trim();
+        var region = string.IsNullOrWhiteSpace(connection.Region) ? InferSpacesRegion(endpoint) ?? "us-east-1" : connection.Region.Trim();
+        var config = new AmazonS3Config
+        {
+            AuthenticationRegion = region,
+            RegionEndpoint = RegionEndpoint.GetBySystemName(region),
+            ForcePathStyle = connection.ForcePathStyle
+        };
+        if (endpoint is not null)
+        {
+            config.ServiceURL = NormalizeEndpoint(endpoint);
+            config.RegionEndpoint = null;
+        }
+        var accessKey = Unprotect(connection.ProtectedAccessKey);
+        var secretKey = Unprotect(connection.ProtectedSecretKey);
+        var sessionToken = Unprotect(connection.ProtectedSessionToken);
+        if (string.IsNullOrWhiteSpace(accessKey) || string.IsNullOrWhiteSpace(secretKey))
+            throw new InvalidOperationException("Access key and secret key are required.");
+        AWSCredentials credentials = string.IsNullOrWhiteSpace(sessionToken)
+            ? new BasicAWSCredentials(accessKey, secretKey)
+            : new SessionAWSCredentials(accessKey, secretKey, sessionToken);
+        return new AmazonS3Client(credentials, config);
+    }
+
+    private string Unprotect(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+        try { return _protector.Unprotect(value); }
+        catch { throw new InvalidOperationException("The saved object-storage credentials could not be decrypted."); }
+    }
+
+    private static async Task EnsureBucketAsync(IAmazonS3 client, string bucket, string region, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(bucket)) throw new InvalidOperationException("Bucket name is required.");
+        if (await AmazonS3Util.DoesS3BucketExistV2Async(client, bucket)) return;
+        await client.PutBucketAsync(new PutBucketRequest { BucketName = bucket, UseClientRegion = true }, cancellationToken);
     }
 
     public async Task SyncAsync(CancellationToken cancellationToken = default)
@@ -242,8 +286,6 @@ public sealed class S3ObjectStorage : IAsyncDisposable
         return Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
     }
 
-    private static string? First(params string?[] values) => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
-    private static bool ParseBool(string? value) => bool.TryParse(value, out var parsed) && parsed;
     private static string NormalizeEndpoint(string endpoint) => endpoint.Contains("://", StringComparison.Ordinal) ? endpoint.TrimEnd('/') : "https://" + endpoint.TrimEnd('/');
     private static string? InferSpacesRegion(string? endpoint)
     {

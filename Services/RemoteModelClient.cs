@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using DanLoopServer.Models;
@@ -26,8 +25,7 @@ public sealed class RemoteModelClient(HttpClient http, IDataProtectionProvider p
     public async Task<string> TestAsync(RemoteModel model, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, model.BaseUrl.TrimEnd('/') + "/chat/completions");
-        if (!string.IsNullOrEmpty(model.ProtectedApiKey))
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _protector.Unprotect(model.ProtectedApiKey));
+        AiRequestAuthentication.Apply(request, model, string.IsNullOrEmpty(model.ProtectedApiKey) ? "" : _protector.Unprotect(model.ProtectedApiKey));
         request.Content = JsonContent.Create(new
         {
             model = model.ModelId,
@@ -46,8 +44,7 @@ public sealed class RemoteModelClient(HttpClient http, IDataProtectionProvider p
     {
         var url = model.BaseUrl.TrimEnd('/') + "/chat/completions";
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        if (!string.IsNullOrEmpty(model.ProtectedApiKey))
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _protector.Unprotect(model.ProtectedApiKey));
+        AiRequestAuthentication.Apply(request, model, string.IsNullOrEmpty(model.ProtectedApiKey) ? "" : _protector.Unprotect(model.ProtectedApiKey));
         var messages = new List<object> { new { role = "system", content = systemPrompt } };
         foreach (var message in conversation)
         {

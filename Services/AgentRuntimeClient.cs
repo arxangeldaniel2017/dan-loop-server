@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -28,7 +27,7 @@ public sealed class AgentRuntimeClient(HttpClient http, IDataProtectionProvider 
             temperature = 0.2
         };
         using var request = new HttpRequestMessage(HttpMethod.Post, model.BaseUrl.TrimEnd('/') + "/chat/completions") { Content = JsonContent.Create(payload) };
-        if (!string.IsNullOrEmpty(model.ProtectedApiKey)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _protector.Unprotect(model.ProtectedApiKey));
+        AiRequestAuthentication.Apply(request, model, string.IsNullOrEmpty(model.ProtectedApiKey) ? "" : _protector.Unprotect(model.ProtectedApiKey));
         using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {

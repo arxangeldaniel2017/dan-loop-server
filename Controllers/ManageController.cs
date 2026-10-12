@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace DanLoopServer.Controllers;
 
 [Authorize]
-public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, WorkspaceService workspace, GitHubService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations) : Controller
+public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, WorkspaceService workspace, GitHubService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations, S3ObjectStorage objectStorage) : Controller
 {
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId)
@@ -243,26 +243,28 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
-    public async Task<IActionResult> CreateModel(string name, string baseUrl, string modelId, string apiKey, string? providerId, List<string>? capabilities, int priority = 100, bool isEnabled = false)
+    public async Task<IActionResult> CreateModel(string name, string baseUrl, string modelId, string apiKey, string? providerId, List<string>? capabilities, string? authenticationType, string? apiKeyHeaderName, int priority = 100, bool isEnabled = false)
     {
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return Back("A valid HTTP(S) base URL is required.");
         await store.UpdateAsync(state =>
         {
             var provider = string.IsNullOrWhiteSpace(providerId) ? "custom" : providerId.Trim();
             var suggested = AiConnectionCatalogService.SuggestedCapabilities(state.AiProviderCatalog, provider, modelId.Trim());
-            state.Models.Add(new RemoteModel
+            var model = new RemoteModel
             {
                 Name = name.Trim(), ProviderId = provider, BaseUrl = baseUrl.TrimEnd('/'), ModelId = modelId.Trim(),
                 ProtectedApiKey = modelClient.ProtectKey(apiKey), IsEnabled = isEnabled, Priority = Math.Clamp(priority, 1, 999),
-                Capabilities = NormalizeCapabilities(capabilities), SuggestedCapabilities = suggested
-            });
+                Capabilities = AiConnectionCatalogService.NormalizeSelectedCapabilities(state.AiProviderCatalog, provider, modelId.Trim(), capabilities), SuggestedCapabilities = suggested
+            };
+            AiConnectionCatalogService.ApplyProviderAuthentication(state.AiProviderCatalog, model, authenticationType, apiKeyHeaderName);
+            state.Models.Add(model);
             return true;
         });
         return Connections("AI connection added.");
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
-    public async Task<IActionResult> UpdateModel(Guid id, string name, string baseUrl, string modelId, string? apiKey, string? providerId, int priority = 100)
+    public async Task<IActionResult> UpdateModel(Guid id, string name, string baseUrl, string modelId, string? apiKey, string? providerId, string? authenticationType, string? apiKeyHeaderName, int priority = 100)
     {
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return Connections("A valid HTTP(S) base URL is required.");
         await store.UpdateAsync(state =>
@@ -272,6 +274,8 @@ public sealed class ManageController(StateStore store, PasswordService passwords
             model.ModelId = modelId.Trim(); model.Priority = Math.Clamp(priority, 1, 999);
             if (!string.IsNullOrWhiteSpace(apiKey)) model.ProtectedApiKey = modelClient.ProtectKey(apiKey);
             model.SuggestedCapabilities = AiConnectionCatalogService.SuggestedCapabilities(state.AiProviderCatalog, model.ProviderId, model.ModelId);
+            model.Capabilities = AiConnectionCatalogService.NormalizeSelectedCapabilities(state.AiProviderCatalog, model.ProviderId, model.ModelId, model.Capabilities);
+            AiConnectionCatalogService.ApplyProviderAuthentication(state.AiProviderCatalog, model, authenticationType, apiKeyHeaderName);
             return true;
         });
         return Connections("AI connection updated.");
@@ -284,6 +288,9 @@ public sealed class ManageController(StateStore store, PasswordService passwords
         await store.UpdateAsync(state =>
         {
             var model = state.Models.First(item => item.Id == id);
+            var allowed = AiConnectionCatalogService.SuggestedCapabilities(state.AiProviderCatalog, model.ProviderId, model.ModelId);
+            var exactModel = state.AiProviderCatalog.FirstOrDefault(item => item.Id.Equals(model.ProviderId, StringComparison.OrdinalIgnoreCase))?.Models.Any(item => item.Id.Equals(model.ModelId, StringComparison.OrdinalIgnoreCase)) == true;
+            if (exactModel && !allowed.Contains(capability, StringComparer.OrdinalIgnoreCase)) return false;
             var selected = model.Capabilities.ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (enabled) selected.Add(capability); else selected.Remove(capability);
             model.Capabilities = selected.Where(AiCapabilities.All.Contains).ToList();
@@ -342,6 +349,113 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> CreateStorageConnection(string name, string provider, string? endpoint, string? region, string bucket, string? prefix, string accessKey, string secretKey, string? sessionToken, bool forcePathStyle = false, bool isEnabled = false)
+    {
+        if (!ObjectStorageProviders.All.Contains(provider)) return Connections("Unknown object-storage provider.");
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(bucket)) return Connections("Connection name and bucket are required.");
+        if (string.IsNullOrWhiteSpace(accessKey) || string.IsNullOrWhiteSpace(secretKey)) return Connections("Access key and secret key are required.");
+        region = string.IsNullOrWhiteSpace(region) ? "us-east-1" : region.Trim();
+        endpoint = StorageEndpoint(provider, endpoint, region);
+        if (provider == ObjectStorageProviders.S3Compatible && !ValidEndpoint(endpoint)) return Connections("A valid HTTP(S) endpoint is required for an S3-compatible service.");
+        await store.UpdateAsync(state =>
+        {
+            if (isEnabled) foreach (var existing in state.ObjectStorageConnections) existing.IsEnabled = false;
+            state.ObjectStorageConnections.Add(new ObjectStorageConnection
+            {
+                Name = name.Trim(), Provider = provider, Endpoint = endpoint, Region = region, Bucket = bucket.Trim(),
+                Prefix = string.IsNullOrWhiteSpace(prefix) ? "dan-loop/projects" : prefix.Trim().Trim('/'),
+                ProtectedAccessKey = objectStorage.ProtectSecret(accessKey), ProtectedSecretKey = objectStorage.ProtectSecret(secretKey),
+                ProtectedSessionToken = objectStorage.ProtectSecret(sessionToken ?? ""), ForcePathStyle = forcePathStyle, IsEnabled = isEnabled
+            });
+            return true;
+        });
+        await objectStorage.RefreshAsync();
+        return Connections("Object-storage connection added.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> UpdateStorageConnection(Guid id, string name, string provider, string? endpoint, string? region, string bucket, string? prefix, string? accessKey, string? secretKey, string? sessionToken, bool forcePathStyle = false)
+    {
+        if (!ObjectStorageProviders.All.Contains(provider)) return Connections("Unknown object-storage provider.");
+        region = string.IsNullOrWhiteSpace(region) ? "us-east-1" : region.Trim();
+        endpoint = StorageEndpoint(provider, endpoint, region);
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(bucket)) return Connections("Connection name and bucket are required.");
+        if (provider == ObjectStorageProviders.S3Compatible && !ValidEndpoint(endpoint)) return Connections("A valid HTTP(S) endpoint is required for an S3-compatible service.");
+        await store.UpdateAsync(state =>
+        {
+            var connection = state.ObjectStorageConnections.First(item => item.Id == id);
+            connection.Name = name.Trim(); connection.Provider = provider; connection.Endpoint = endpoint; connection.Region = region;
+            connection.Bucket = bucket.Trim(); connection.Prefix = string.IsNullOrWhiteSpace(prefix) ? "dan-loop/projects" : prefix.Trim().Trim('/');
+            connection.ForcePathStyle = forcePathStyle;
+            if (!string.IsNullOrWhiteSpace(accessKey)) connection.ProtectedAccessKey = objectStorage.ProtectSecret(accessKey);
+            if (!string.IsNullOrWhiteSpace(secretKey)) connection.ProtectedSecretKey = objectStorage.ProtectSecret(secretKey);
+            if (!string.IsNullOrWhiteSpace(sessionToken)) connection.ProtectedSessionToken = objectStorage.ProtectSecret(sessionToken);
+            return true;
+        });
+        await objectStorage.RefreshAsync();
+        return Connections("Object-storage connection updated.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> TestStorageConnection(Guid id, CancellationToken cancellationToken)
+    {
+        var connection = await store.ReadAsync(state => state.ObjectStorageConnections.First(item => item.Id == id));
+        try
+        {
+            var message = await objectStorage.TestAsync(connection, cancellationToken);
+            await store.UpdateAsync(state => { var current = state.ObjectStorageConnections.First(item => item.Id == id); current.LastTestStatus = "Succeeded"; current.LastTestMessage = message; current.LastTestedAt = DateTimeOffset.UtcNow; return true; });
+            return Connections(message);
+        }
+        catch (Exception ex)
+        {
+            var message = ex.Message.Length > 500 ? ex.Message[..500] : ex.Message;
+            await store.UpdateAsync(state => { var current = state.ObjectStorageConnections.First(item => item.Id == id); current.LastTestStatus = "Failed"; current.LastTestMessage = message; current.LastTestedAt = DateTimeOffset.UtcNow; return true; });
+            return Connections("Storage test failed: " + message);
+        }
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> ToggleStorageConnection(Guid id)
+    {
+        await store.UpdateAsync(state =>
+        {
+            var selected = state.ObjectStorageConnections.First(item => item.Id == id);
+            var enable = !selected.IsEnabled;
+            foreach (var connection in state.ObjectStorageConnections) connection.IsEnabled = enable && connection.Id == id;
+            return true;
+        });
+        await objectStorage.RefreshAsync();
+        return Connections("Object-storage connection status updated.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> DeleteStorageConnection(Guid id)
+    {
+        await store.UpdateAsync(state => state.ObjectStorageConnections.RemoveAll(item => item.Id == id));
+        await objectStorage.RefreshAsync();
+        return Connections("Object-storage connection deleted.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
+    public async Task<IActionResult> BulkStorageConnections(List<Guid>? selectedIds, string action)
+    {
+        var ids = (selectedIds ?? []).ToHashSet();
+        await store.UpdateAsync(state =>
+        {
+            if (action == "delete") state.ObjectStorageConnections.RemoveAll(item => ids.Contains(item.Id));
+            else if (action == "deactivate") foreach (var item in state.ObjectStorageConnections.Where(item => ids.Contains(item.Id))) item.IsEnabled = false;
+            else if (action == "activate")
+            {
+                var selected = state.ObjectStorageConnections.FirstOrDefault(item => ids.Contains(item.Id));
+                foreach (var item in state.ObjectStorageConnections) item.IsEnabled = item.Id == selected?.Id;
+            }
+            return true;
+        });
+        await objectStorage.RefreshAsync();
+        return Connections($"Updated {ids.Count} object-storage connection(s). Only one storage connection can be active at a time.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> CreateUser(string username, string password, string role)
     {
         username = username.Trim();
@@ -386,6 +500,14 @@ public sealed class ManageController(StateStore store, PasswordService passwords
 
     private static List<string> NormalizeCapabilities(IEnumerable<string>? capabilities) =>
         (capabilities ?? []).Where(AiCapabilities.All.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private static string StorageEndpoint(string provider, string? endpoint, string region) => provider switch
+    {
+        ObjectStorageProviders.AmazonS3 => "",
+        ObjectStorageProviders.DigitalOceanSpaces when string.IsNullOrWhiteSpace(endpoint) => $"https://{region}.digitaloceanspaces.com",
+        _ => endpoint?.Trim().TrimEnd('/') ?? ""
+    };
+    private static bool ValidEndpoint(string endpoint) => Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 
     private IActionResult Connections(string message) { TempData["Message"] = message; return Redirect("/#connections"); }
     private IActionResult Back(string message) { TempData["Message"] = message; return RedirectToAction("Index", "Home"); }

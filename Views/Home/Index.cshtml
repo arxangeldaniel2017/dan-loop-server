@@ -1,6 +1,5 @@
 @model DashboardViewModel
 @inject GitHubService GitHub
-@inject S3ObjectStorage ObjectStorage
 @{
     ViewData["Title"] = "Dashboard";
     bool CanManage(Guid projectId) => Model.IsAdmin || Model.State.Permissions.Any(x => x.UserId == Model.CurrentUserId && x.ProjectId == projectId && x.CanManage);
@@ -19,8 +18,8 @@
     @if (Model.IsAdmin) { <button class="tab" data-tab="tools">Tools</button><button class="tab advanced-tab" data-tab="workspace">AI workspace access <small>Advanced</small></button><button class="tab" data-tab="connections">Connections</button><button class="tab" data-tab="access">Access</button> }
 </nav>
 
-<section id="projects" class="panel tab-panel active">
-    <div class="export-toolbar"><a class="button secondary" asp-controller="Export" asp-action="Projects">Export projects CSV</a><a class="button secondary" asp-controller="Export" asp-action="Loops">Export loops CSV</a></div>
+<section id="projects" class="panel tab-panel active" data-disclosure-scope>
+    <div class="export-toolbar"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".project-disclosure">Expand all projects</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".project-disclosure">Collapse all projects</button><a class="button secondary" asp-controller="Export" asp-action="Projects">Export projects CSV</a><a class="button secondary" asp-controller="Export" asp-action="Loops">Export loops CSV</a></div>
     @if (Model.IsAdmin)
     {
         <details class="create-box"><summary>＋ New project</summary>
@@ -38,8 +37,9 @@
     {
         var loops = Model.State.Loops.Where(x => x.ProjectId == project.Id).ToList();
         var repositoryLinks = Model.State.ProjectRepositories.Where(x => x.ProjectId == project.Id).Select(link => Model.State.GitHubConnections.SelectMany(connection => connection.Repositories).FirstOrDefault(repository => repository.Id == link.RepositoryId)).Where(x => x is not null).ToList();
-        <article class="project-card">
-            <div class="project-head"><div><span class="dot"></span><h2>@project.Name</h2><p>@project.Description</p></div><span class="pill">@loops.Count loops</span></div>
+        <details class="project-card project-disclosure">
+            <summary class="project-head"><div><span class="dot"></span><h2>@project.Name</h2><p>@project.Description</p></div><span class="pill">@loops.Count loops</span></summary>
+            <div class="project-disclosure-body">
             @if (repositoryLinks.Count > 0) { <div class="repository-links">@foreach (var repository in repositoryLinks) { <a href="@repository!.HtmlUrl" target="_blank" rel="noopener">@repository.FullName</a> }</div> }
             <a class="button project-files" asp-controller="Files" asp-action="Index" asp-route-projectId="@project.Id">Manage folders & files →</a>
             @if (CanManage(project.Id))
@@ -72,16 +72,17 @@
                 </form>
             }
             @if (Model.IsAdmin) { <form asp-controller="Manage" asp-action="DeleteProject" method="post" class="delete-project" onsubmit="return confirm('Delete this project and all its data?')"><input type="hidden" name="id" value="@project.Id"/><button class="link-danger">Delete project</button></form> }
-        </article>
+            </div>
+        </details>
     }
 </section>
 
-<section id="steps" class="panel tab-panel">
-    <div class="section-title"><div><p class="eyebrow">SERVER-MANAGED WORKFLOW</p><h2>Execution plan</h2><p class="muted">AI proposes the plan; the server owns step order, attempts, retries, and outcomes. PLAN.md is restored from this record if it is deleted.</p></div><a class="button secondary" asp-controller="Export" asp-action="Plans">Export CSV</a></div>
-    <div id="plan-steps-list" data-plan-steps-url="@Url.Action("PlanStepsPartial", "Home")">@await Html.PartialAsync("_PlanSteps", Model)</div>
+<section id="steps" class="panel tab-panel" data-disclosure-scope>
+    <div class="section-title"><div><p class="eyebrow">SERVER-MANAGED WORKFLOW</p><h2>Execution plan</h2><p class="muted">AI proposes the plan; the server owns step order, attempts, retries, and outcomes. PLAN.md is restored from this record if it is deleted.</p></div><div class="export-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".plan-board">Expand all</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".plan-board">Collapse all</button><a class="button secondary" asp-controller="Export" asp-action="Plans">Export CSV</a></div></div>
+    <div id="plan-steps-list" data-plan-steps-url="@Url.Action("PlanStepsPartial", "Home")" data-disclosure-scope>@await Html.PartialAsync("_PlanSteps", Model)</div>
 </section>
 
-<section id="files" class="panel tab-panel">
+<section id="files" class="panel tab-panel" data-disclosure-scope>
     <div class="section-title"><div><h2>Folders & files</h2><p class="muted">Upload, create folders, preview, edit, or safely remove project files.</p></div><a class="button secondary" asp-controller="Export" asp-action="Files">Export CSV</a></div>
     @if (!Model.VisibleProjects.Any()) { <div class="empty">No project workspaces are available yet.</div> }
     @if (Model.VisibleProjects.Any())
@@ -89,7 +90,8 @@
         <div class="file-project-switcher">
             <select aria-label="Project" data-file-project-select>@foreach (var project in Model.VisibleProjects) { <option value="@project.Id" data-workspace-url="@Url.Action("WorkspacePartial", "Files", new { projectId = project.Id })">@project.Name</option> }</select>
         </div>
-        <div class="dashboard-inline-workspace selected-project-workspace" data-selected-workspace></div>
+        <div class="disclosure-toolbar"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".file-project-disclosure">Expand project</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".file-project-disclosure">Collapse project</button></div>
+        <details class="file-project-disclosure" open><summary data-file-project-summary>Project files</summary><div class="dashboard-inline-workspace selected-project-workspace" data-selected-workspace></div></details>
     }
 </section>
 
@@ -121,8 +123,8 @@
     @await Html.PartialAsync("_ToolConfiguration", Model)
 </section>
 
-<section id="connections" class="panel tab-panel">
-    <div class="section-title"><div><p class="eyebrow">SERVICES & MODEL ROUTING</p><h2>Connections</h2><p class="muted">Models are tried by capability and priority. If one fails, the same job continues with the next eligible connection.</p></div><a class="button secondary" asp-controller="Export" asp-action="Models">Export CSV</a></div>
+<section id="connections" class="panel tab-panel" data-disclosure-scope>
+    <div class="section-title"><div><p class="eyebrow">SERVICES & MODEL ROUTING</p><h2>Connections</h2><p class="muted">Models are tried by capability and priority. If one fails, the same job continues with the next eligible connection.</p></div><div class="export-actions"><button type="button" class="secondary" data-disclosure-action="expand" data-disclosure-target=".connection-card,.github-card">Expand all</button><button type="button" class="secondary" data-disclosure-action="collapse" data-disclosure-target=".connection-card,.github-card">Collapse all</button><a class="button secondary" asp-controller="Export" asp-action="Models">Export CSV</a></div></div>
     <details class="create-box connection-creator"><summary>＋ Add connection</summary>
         <form asp-controller="Manage" asp-action="CreateModel" method="post" class="form-grid" data-ai-connection-form>
             <label>Connection type<select name="providerId" data-ai-provider>@foreach (var provider in Model.State.AiProviderCatalog) { <option value="@provider.Id" data-base-url="@provider.BaseUrl">@provider.Name</option> }</select></label>
@@ -130,8 +132,10 @@
             <label>Model ID<input name="modelId" list="connection-model-list" required placeholder="Select or enter a model" /></label><datalist id="connection-model-list"></datalist>
             <label>Priority<input name="priority" type="number" min="1" max="999" value="100" /><small>Lower numbers are tried first.</small></label>
             <label class="wide">Base URL<input name="baseUrl" type="url" required value="@Model.State.AiProviderCatalog.FirstOrDefault()?.BaseUrl" /></label>
-            <label class="wide">API key<input name="apiKey" type="password" autocomplete="off" placeholder="Optional for local models" /></label>
-            <fieldset class="wide capability-picker"><legend>Active capabilities</legend>@foreach (var capability in AiCapabilities.All) { <label class="check"><input type="checkbox" name="capabilities" value="@capability" /> @capability</label> }</fieldset>
+            <label data-ai-authentication>Authentication<select name="authenticationType" data-ai-authentication-select>@foreach (var type in AiAuthenticationTypes.All) { <option value="@type">@type</option> }</select></label>
+            <label data-ai-key-header hidden>Header name<input name="apiKeyHeaderName" value="api-key" /></label>
+            <label class="wide" data-ai-api-key>API credential<input name="apiKey" type="password" autocomplete="off" /></label>
+            <fieldset class="wide capability-picker"><legend>Active capabilities</legend>@foreach (var capability in AiCapabilities.All) { <label class="check" data-ai-capability="@capability"><input type="checkbox" name="capabilities" value="@capability" /> @capability</label> }</fieldset>
             <div class="wide provider-links" data-provider-links></div><label class="check"><input type="checkbox" name="isEnabled" value="true" checked /> Active</label><button>Add AI connection</button>
         </form>
     </details>
@@ -141,21 +145,51 @@
     @foreach (var m in Model.State.Models.OrderBy(item => item.Priority).ThenBy(item => item.Name))
     {
         var provider = Model.State.AiProviderCatalog.FirstOrDefault(item => item.Id == m.ProviderId);
-        <article class="connection-card @(m.IsEnabled ? "active" : "inactive")">
-            <header><label class="connection-select"><input form="bulk-ai-connections" type="checkbox" name="selectedIds" value="@m.Id" aria-label="Select @m.Name" /></label><span class="status @(m.IsEnabled ? "online" : "")"></span><div><h3>@m.Name</h3><p>@(provider?.Name ?? m.ProviderId) · <code>@m.ModelId</code> · priority @m.Priority</p></div><span class="pill">@(m.IsEnabled ? "active" : "inactive")</span></header>
+        <details class="connection-card @(m.IsEnabled ? "active" : "inactive")">
+            <summary><label class="connection-select"><input form="bulk-ai-connections" type="checkbox" name="selectedIds" value="@m.Id" aria-label="Select @m.Name" /></label><span class="status @(m.IsEnabled ? "online" : "")"></span><div><h3>@m.Name</h3><p>@(provider?.Name ?? m.ProviderId) · <code>@m.ModelId</code> · priority @m.Priority</p></div><span class="pill">@(m.IsEnabled ? "active" : "inactive")</span></summary>
             <div class="capability-row" aria-label="Capabilities for @m.Name">
-                @foreach (var capability in AiCapabilities.All)
+                @foreach (var capability in m.SuggestedCapabilities.Count > 0 ? m.SuggestedCapabilities.AsEnumerable() : AiCapabilities.All.AsEnumerable())
                 {
                     <label class="capability-chip"><input type="checkbox" checked="@(m.Capabilities.Contains(capability, StringComparer.OrdinalIgnoreCase))" data-model-capability data-model-id="@m.Id" value="@capability" /> @capability</label>
                 }
             </div>
             @if (m.Capabilities.Count == 0) { <p class="capability-default">Using predefined capabilities: @string.Join(", ", m.SuggestedCapabilities.DefaultIfEmpty("Generator"))</p> }
-            <div class="connection-meta"><span>@m.BaseUrl</span><span>Test: @m.LastTestStatus@(m.LastTestedAt is null ? "" : $" · {m.LastTestedAt.Value.ToLocalTime():g}")</span>@if (!string.IsNullOrWhiteSpace(m.LastTestMessage)) { <small>@m.LastTestMessage</small> }</div>
-            <div class="actions"><form asp-controller="Manage" asp-action="TestModel" method="post"><input type="hidden" name="id" value="@m.Id"/><button class="secondary">Test request</button></form><form asp-controller="Manage" asp-action="ToggleModel" method="post"><input type="hidden" name="id" value="@m.Id"/><button class="secondary">@(m.IsEnabled ? "Deactivate" : "Activate")</button></form><details><summary>Edit</summary><form asp-controller="Manage" asp-action="UpdateModel" method="post" class="form-grid compact"><input type="hidden" name="id" value="@m.Id"/><input type="hidden" name="providerId" value="@m.ProviderId"/><label>Name<input name="name" value="@m.Name" required /></label><label>Model ID<input name="modelId" value="@m.ModelId" required /></label><label>Priority<input name="priority" type="number" min="1" max="999" value="@m.Priority" /></label><label>New API key<input name="apiKey" type="password" placeholder="Leave blank to keep current" /></label><label class="wide">Base URL<input name="baseUrl" type="url" value="@m.BaseUrl" required /></label><button>Save</button></form></details><form asp-controller="Manage" asp-action="DeleteModel" method="post" onsubmit="return confirm('Delete this AI connection?')"><input type="hidden" name="id" value="@m.Id"/><button class="link-danger">Delete</button></form></div>
-        </article>
+            <div class="connection-meta"><span>@m.BaseUrl</span><span>@m.AuthenticationType</span><span>Test: @m.LastTestStatus@(m.LastTestedAt is null ? "" : $" · {m.LastTestedAt.Value.ToLocalTime():g}")</span>@if (!string.IsNullOrWhiteSpace(m.LastTestMessage)) { <small>@m.LastTestMessage</small> }</div>
+            <div class="actions"><form asp-controller="Manage" asp-action="TestModel" method="post"><input type="hidden" name="id" value="@m.Id"/><button class="secondary">Test request</button></form><form asp-controller="Manage" asp-action="ToggleModel" method="post"><input type="hidden" name="id" value="@m.Id"/><button class="secondary">@(m.IsEnabled ? "Deactivate" : "Activate")</button></form><details><summary>Edit</summary><form asp-controller="Manage" asp-action="UpdateModel" method="post" class="form-grid compact"><input type="hidden" name="id" value="@m.Id"/><input type="hidden" name="providerId" value="@m.ProviderId"/><input type="hidden" name="authenticationType" value="@m.AuthenticationType"/><input type="hidden" name="apiKeyHeaderName" value="@m.ApiKeyHeaderName"/><label>Name<input name="name" value="@m.Name" required /></label><label>Model ID<input name="modelId" value="@m.ModelId" required /></label><label>Priority<input name="priority" type="number" min="1" max="999" value="@m.Priority" /></label>@if (m.AuthenticationType != AiAuthenticationTypes.None) { <label>New credential<input name="apiKey" type="password" placeholder="Leave blank to keep current" /></label> }<label class="wide">Base URL<input name="baseUrl" type="url" value="@m.BaseUrl" required /></label><button>Save</button></form></details><form asp-controller="Manage" asp-action="DeleteModel" method="post" onsubmit="return confirm('Delete this AI connection?')"><input type="hidden" name="id" value="@m.Id"/><button class="link-danger">Delete</button></form></div>
+        </details>
     }
     </div>
-    <section class="connection-subsection"><div class="section-title"><div><p class="eyebrow">OBJECT STORAGE</p><h2>S3 / Spaces</h2><p class="muted">@(ObjectStorage.IsEnabled ? "Connected. Project files restore at startup and synchronize in the background." : "Not configured. Add S3 or Spaces application variables to enable managed file storage.")</p></div><span class="pill">@(ObjectStorage.IsEnabled ? "active" : "local fallback")</span></div><div class="connection-help"><code>S3_BUCKET</code><code>S3_ENDPOINT</code><code>S3_ACCESS_KEY</code><code>S3_SECRET_KEY</code><a href="https://docs.digitalocean.com/products/spaces/how-to/manage-access/" target="_blank" rel="noopener">Spaces keys ↗</a><a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/GetStartedWithS3.html" target="_blank" rel="noopener">S3 documentation ↗</a></div></section>
+    <section class="connection-subsection">
+        <div class="section-title"><div><p class="eyebrow">OBJECT STORAGE</p><h2>S3 / Spaces</h2><p class="muted">Save several storage connections and activate the one that should mirror project files.</p></div><span class="pill">@(Model.State.ObjectStorageConnections.Any(item => item.IsEnabled) ? "active" : "local fallback")</span></div>
+        <details class="create-box connection-creator"><summary>＋ Add object-storage connection</summary>
+            <form asp-controller="Manage" asp-action="CreateStorageConnection" method="post" class="form-grid" data-storage-connection-form>
+                <label>Connection type<select name="provider" data-storage-provider>@foreach (var provider in ObjectStorageProviders.All) { <option value="@provider">@provider</option> }</select></label>
+                <label>Display name<input name="name" required placeholder="Project storage" /></label>
+                <label>Bucket<input name="bucket" required autocomplete="off" /></label>
+                <label data-storage-region>Region<input name="region" value="us-east-1" required /></label>
+                <label class="wide" data-storage-endpoint hidden>Endpoint<input name="endpoint" type="url" placeholder="https://region.digitaloceanspaces.com" /></label>
+                <label class="wide">Folder prefix<input name="prefix" value="dan-loop/projects" /><small>All project namespaces are stored below this folder.</small></label>
+                <label>Access key<input name="accessKey" type="password" required autocomplete="off" /></label>
+                <label>Secret key<input name="secretKey" type="password" required autocomplete="off" /></label>
+                <label data-storage-session>Session token<input name="sessionToken" type="password" autocomplete="off" placeholder="Optional" /></label>
+                <label class="check" data-storage-path-style hidden><input type="checkbox" name="forcePathStyle" value="true" /> Force path-style URLs</label>
+                <div class="wide provider-links" data-storage-links><a href="https://aws.amazon.com/s3/pricing/" target="_blank" rel="noopener">Pricing ↗</a><a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/GetStartedWithS3.html" target="_blank" rel="noopener">Documentation ↗</a></div>
+                <label class="check"><input type="checkbox" name="isEnabled" value="true" checked /> Active</label><button>Add storage connection</button>
+            </form>
+        </details>
+        <form id="bulk-storage-connections" asp-controller="Manage" asp-action="BulkStorageConnections" method="post" class="connection-bulk-actions"><strong>@Model.State.ObjectStorageConnections.Count storage connection(s)</strong><button name="action" value="activate" class="secondary">Activate selected</button><button name="action" value="deactivate" class="secondary">Deactivate selected</button><button name="action" value="delete" class="danger" onclick="return confirm('Delete selected storage connections?')">Delete selected</button></form>
+        <div class="connection-list">
+        @foreach (var storage in Model.State.ObjectStorageConnections.OrderByDescending(item => item.IsEnabled).ThenBy(item => item.Name))
+        {
+            <details class="connection-card @(storage.IsEnabled ? "active" : "inactive")">
+                <summary><label class="connection-select"><input form="bulk-storage-connections" type="checkbox" name="selectedIds" value="@storage.Id" aria-label="Select @storage.Name" /></label><span class="status @(storage.IsEnabled ? "online" : "")"></span><div><h3>@storage.Name</h3><p>@storage.Provider · <code>@storage.Bucket</code></p></div><span class="pill">@(storage.IsEnabled ? "active" : "inactive")</span></summary>
+                <div class="connection-meta"><span>@(string.IsNullOrWhiteSpace(storage.Endpoint) ? $"AWS · {storage.Region}" : storage.Endpoint)</span><span>Prefix: @storage.Prefix</span><span>Test: @storage.LastTestStatus@(storage.LastTestedAt is null ? "" : $" · {storage.LastTestedAt.Value.ToLocalTime():g}")</span>@if (!string.IsNullOrWhiteSpace(storage.LastTestMessage)) { <small>@storage.LastTestMessage</small> }</div>
+                <div class="actions"><form asp-controller="Manage" asp-action="TestStorageConnection" method="post"><input type="hidden" name="id" value="@storage.Id"/><button class="secondary">Test connection</button></form><form asp-controller="Manage" asp-action="ToggleStorageConnection" method="post"><input type="hidden" name="id" value="@storage.Id"/><button class="secondary">@(storage.IsEnabled ? "Deactivate" : "Activate")</button></form><details><summary>Edit</summary><form asp-controller="Manage" asp-action="UpdateStorageConnection" method="post" class="form-grid compact" data-storage-connection-form><input type="hidden" name="id" value="@storage.Id"/><label>Type<select name="provider" data-storage-provider>@foreach (var provider in ObjectStorageProviders.All) { <option value="@provider" selected="@(provider == storage.Provider)">@provider</option> }</select></label><label>Name<input name="name" value="@storage.Name" required /></label><label>Bucket<input name="bucket" value="@storage.Bucket" required /></label><label data-storage-region>Region<input name="region" value="@storage.Region" required /></label><label class="wide" data-storage-endpoint>Endpoint<input name="endpoint" type="url" value="@storage.Endpoint" /></label><label class="wide">Folder prefix<input name="prefix" value="@storage.Prefix" /></label><label>New access key<input name="accessKey" type="password" placeholder="Keep current" /></label><label>New secret key<input name="secretKey" type="password" placeholder="Keep current" /></label><label data-storage-session>New session token<input name="sessionToken" type="password" placeholder="Keep current" /></label><label class="check" data-storage-path-style><input type="checkbox" name="forcePathStyle" value="true" checked="@storage.ForcePathStyle" /> Force path-style URLs</label><button>Save</button></form></details><form asp-controller="Manage" asp-action="DeleteStorageConnection" method="post" onsubmit="return confirm('Delete this storage connection? Files already stored remotely will not be deleted.')"><input type="hidden" name="id" value="@storage.Id"/><button class="link-danger">Delete</button></form></div>
+            </details>
+        }
+        </div>
+        @if (!Model.State.ObjectStorageConnections.Any()) { <div class="empty">No object-storage connection yet. Project files remain safely available in local storage.</div> }
+    </section>
     <div class="connection-subsection">
     <div class="section-title"><div><p class="eyebrow">SOURCE CONTROL & AUTOMATION</p><h2>GitHub connections</h2></div><a class="button secondary" asp-controller="Export" asp-action="GitHub">Export CSV</a></div>
     <details class="create-box"><summary>＋ Connect with fine-grained token</summary>
@@ -173,10 +207,9 @@
     }
     @foreach (var connection in Model.State.GitHubConnections)
     {
-        <article class="github-card">
-            <div class="project-head"><div><h3>@connection.AccountLogin</h3><p>@connection.AuthenticationType authentication · @connection.AccountType · @connection.Repositories.Count repositories · refreshed @connection.RefreshedAt.ToLocalTime().ToString("g")</p></div>
-                <div class="actions">@if (!string.IsNullOrWhiteSpace(connection.SettingsUrl)) { <a class="button secondary" href="@connection.SettingsUrl">Manage on GitHub</a> }<form asp-controller="GitHub" asp-action="Refresh" method="post"><input type="hidden" name="id" value="@connection.Id"/><button class="secondary">Refresh</button></form><form asp-controller="GitHub" asp-action="Delete" method="post" onsubmit="return confirm('Remove this GitHub connection from the server?')"><input type="hidden" name="id" value="@connection.Id"/><button class="link-danger">Remove</button></form></div>
-            </div>
+        <details class="github-card">
+            <summary class="project-head"><div><h3>@connection.AccountLogin</h3><p>@connection.AuthenticationType authentication · @connection.AccountType · @connection.Repositories.Count repositories · refreshed @connection.RefreshedAt.ToLocalTime().ToString("g")</p></div><span class="pill">GitHub</span></summary>
+            <div class="actions">@if (!string.IsNullOrWhiteSpace(connection.SettingsUrl)) { <a class="button secondary" href="@connection.SettingsUrl">Manage on GitHub</a> }<form asp-controller="GitHub" asp-action="Refresh" method="post"><input type="hidden" name="id" value="@connection.Id"/><button class="secondary">Refresh</button></form><form asp-controller="GitHub" asp-action="Delete" method="post" onsubmit="return confirm('Remove this GitHub connection from the server?')"><input type="hidden" name="id" value="@connection.Id"/><button class="link-danger">Remove</button></form></div>
             @foreach (var project in Model.State.Projects)
             {
                 var selected = Model.State.ProjectRepositories.Where(x => x.ProjectId == project.Id && x.GitHubConnectionId == connection.Id).Select(x => x.RepositoryId).ToHashSet();
@@ -193,7 +226,7 @@
                 </form>
                 @foreach (var repository in connection.Repositories.Where(x => selected.Contains(x.Id))) { <form asp-controller="GitHub" asp-action="ImportRepository" method="post" class="import-repository"><input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="repositoryId" value="@repository.Id"/><button class="secondary">Import fresh copy of @repository.FullName</button></form> }
             }
-        </article>
+        </details>
     }
     @foreach (var project in Model.State.Projects)
     {

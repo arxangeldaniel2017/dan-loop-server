@@ -182,6 +182,21 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                     }
                     _state.Version = 12;
                 }
+                if (_state.Version < 13)
+                {
+                    _state.ObjectStorageConnections ??= [];
+                    _state.Version = 13;
+                }
+                if (_state.Version < 14)
+                {
+                    foreach (var model in _state.Models)
+                    {
+                        model.AuthenticationType = model.ProviderId is "ollama" or "lmstudio" ? AiAuthenticationTypes.None
+                            : model.ProviderId == "azure" ? AiAuthenticationTypes.ApiKeyHeader : AiAuthenticationTypes.BearerToken;
+                        model.ApiKeyHeaderName = model.ProviderId == "azure" ? "api-key" : "Authorization";
+                    }
+                    _state.Version = 14;
+                }
                 await SaveUnsafeAsync();
                 return;
             }

@@ -19,8 +19,10 @@ public sealed class AiConnectionCatalogService(StateStore store, IWebHostEnviron
             foreach (var model in state.Models)
             {
                 if (model.ProviderId == "custom") model.ProviderId = InferProvider(catalog, model.BaseUrl);
+                ApplyProviderAuthentication(catalog, model);
                 var suggested = SuggestedCapabilities(catalog, model.ProviderId, model.ModelId);
                 if (suggested.Count > 0) model.SuggestedCapabilities = suggested;
+                model.Capabilities = NormalizeSelectedCapabilities(catalog, model.ProviderId, model.ModelId, model.Capabilities);
             }
             return true;
         });
@@ -32,14 +34,35 @@ public sealed class AiConnectionCatalogService(StateStore store, IWebHostEnviron
     {
         var provider = catalog.FirstOrDefault(item => item.Id.Equals(providerId, StringComparison.OrdinalIgnoreCase));
         var model = provider?.Models.FirstOrDefault(item => item.Id.Equals(modelId, StringComparison.OrdinalIgnoreCase));
-        model ??= provider?.Models.FirstOrDefault(item => item.Id.Equals("custom", StringComparison.OrdinalIgnoreCase));
         if (model is not null) return model.Capabilities.Where(AiCapabilities.All.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         var value = modelId.ToLowerInvariant();
         if (value.Contains("image") || value.Contains("flux") || value.Contains("stable-diffusion")) return [AiCapabilities.Generator, AiCapabilities.Image, AiCapabilities.Files];
         if (value.Contains("audio") || value.Contains("whisper") || value.Contains("tts")) return [AiCapabilities.Generator, AiCapabilities.Audio, AiCapabilities.Files];
         if (value.Contains("video") || value.Contains("sora")) return [AiCapabilities.Generator, AiCapabilities.Video, AiCapabilities.Files];
-        return [AiCapabilities.Planner, AiCapabilities.Coder, AiCapabilities.Orchestrator, AiCapabilities.ToolCalling, AiCapabilities.Generator, AiCapabilities.Files];
+        if (value.Contains("coder") || value.Contains("codestral") || value.Contains("code")) return [AiCapabilities.Coder, AiCapabilities.ToolCalling, AiCapabilities.Generator, AiCapabilities.Files];
+        var providerCapabilities = provider?.Models.SelectMany(item => item.Capabilities).Where(AiCapabilities.All.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return providerCapabilities is { Count: > 0 } ? providerCapabilities : [AiCapabilities.Planner, AiCapabilities.Coder, AiCapabilities.Orchestrator, AiCapabilities.ToolCalling, AiCapabilities.Generator, AiCapabilities.Files];
+    }
+
+    public static List<string> NormalizeSelectedCapabilities(IEnumerable<AiProviderCatalogItem> catalog, string providerId, string modelId, IEnumerable<string>? selected)
+    {
+        var values = (selected ?? []).Where(AiCapabilities.All.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var provider = catalog.FirstOrDefault(item => item.Id.Equals(providerId, StringComparison.OrdinalIgnoreCase));
+        var exact = provider?.Models.FirstOrDefault(item => item.Id.Equals(modelId, StringComparison.OrdinalIgnoreCase));
+        if (exact is null) return values;
+        return values.Where(value => exact.Capabilities.Contains(value, StringComparer.OrdinalIgnoreCase)).ToList();
+    }
+
+    public static void ApplyProviderAuthentication(IEnumerable<AiProviderCatalogItem> catalog, RemoteModel model, string? requestedType = null, string? requestedHeader = null)
+    {
+        var provider = catalog.FirstOrDefault(item => item.Id.Equals(model.ProviderId, StringComparison.OrdinalIgnoreCase));
+        model.AuthenticationType = provider?.AllowsAuthenticationSelection == true
+            ? AiAuthenticationTypes.Normalize(requestedType ?? model.AuthenticationType)
+            : AiAuthenticationTypes.Normalize(provider?.AuthenticationType ?? model.AuthenticationType);
+        var header = provider?.AllowsAuthenticationSelection == true ? requestedHeader : provider?.ApiKeyHeaderName;
+        model.ApiKeyHeaderName = model.AuthenticationType == AiAuthenticationTypes.ApiKeyHeader
+            ? (string.IsNullOrWhiteSpace(header) ? "api-key" : header.Trim()) : "Authorization";
     }
 
     private static string InferProvider(IEnumerable<AiProviderCatalogItem> catalog, string baseUrl)

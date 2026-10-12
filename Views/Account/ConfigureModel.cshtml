@@ -17,8 +17,10 @@
         <label>Model ID<input name="modelId" list="wizard-model-list" required placeholder="Select or enter a model" /></label>
         <datalist id="wizard-model-list"></datalist>
         <label>Model URL<input name="baseUrl" value="@(Context.Request.HasFormContentType ? Context.Request.Form["baseUrl"] : catalog.FirstOrDefault()?.BaseUrl)" type="url" required /></label>
-        <label>API key<input name="apiKey" type="password" autocomplete="off" placeholder="Optional for local models" /></label>
-        <fieldset class="capability-picker"><legend>Active capabilities</legend>@foreach (var capability in AiCapabilities.All) { <label class="check"><input type="checkbox" name="capabilities" value="@capability" /> @capability</label> }</fieldset>
+        <label data-ai-authentication>Authentication<select name="authenticationType" data-ai-authentication-select>@foreach (var type in AiAuthenticationTypes.All) { <option value="@type">@type</option> }</select></label>
+        <label data-ai-key-header hidden>Header name<input name="apiKeyHeaderName" value="api-key" /></label>
+        <label data-ai-api-key>API credential<input name="apiKey" type="password" autocomplete="off" /></label>
+        <fieldset class="capability-picker"><legend>Active capabilities</legend>@foreach (var capability in AiCapabilities.All) { <label class="check" data-ai-capability="@capability"><input type="checkbox" name="capabilities" value="@capability" /> @capability</label> }</fieldset>
         <div class="provider-links" data-provider-links></div>
         <div class="wizard-actions"><button name="addAnother" value="true">Add another</button><button class="secondary" name="addAnother" value="false">Add and continue →</button></div>
     </form>

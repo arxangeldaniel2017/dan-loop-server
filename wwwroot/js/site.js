@@ -18,12 +18,50 @@ document.querySelectorAll('[data-ai-connection-form]').forEach((form, formIndex)
   const providerSelect = form.querySelector('[data-ai-provider]');
   const baseUrl = form.querySelector('input[name="baseUrl"]');
   const modelInput = form.querySelector('input[name="modelId"]');
+  const authentication = form.querySelector('[data-ai-authentication]');
+  const authenticationSelect = form.querySelector('[data-ai-authentication-select]');
+  const apiKey = form.querySelector('[data-ai-api-key]');
+  const apiKeyInput = apiKey?.querySelector('input');
+  const keyHeader = form.querySelector('[data-ai-key-header]');
+  const keyHeaderInput = keyHeader?.querySelector('input');
   let modelList = form.querySelector('datalist');
   const links = form.querySelector('[data-provider-links]');
   if (modelList && document.querySelectorAll(`#${CSS.escape(modelList.id)}`).length > 1) {
     modelList.id = `${modelList.id}-${formIndex}`;
     modelInput?.setAttribute('list', modelList.id);
   }
+  const updateCapabilities = (provider) => {
+    const exact = (provider?.models || []).find(item => String(item.id).toLowerCase() === String(modelInput?.value || '').toLowerCase());
+    const modelName = String(modelInput?.value || '').toLowerCase();
+    const inferred = modelName.includes('coder') || modelName.includes('codestral') || modelName.includes('code')
+      ? ['Coder', 'Tool calling', 'Generator', 'Files'] : null;
+    const allowed = new Set((exact?.capabilities || inferred || (provider?.models || []).flatMap(item => item.capabilities || [])));
+    form.querySelectorAll('[data-ai-capability]').forEach(label => {
+      const checkbox = label.querySelector('input');
+      const visible = !provider || allowed.size === 0 || allowed.has(label.dataset.aiCapability);
+      label.hidden = !visible;
+      if (!visible) checkbox.checked = false;
+      else if (exact) checkbox.checked = true;
+    });
+  };
+  const updateAuthentication = (provider) => {
+    if (!authenticationSelect) return;
+    const selectable = Boolean(provider?.allowsAuthenticationSelection);
+    authentication.hidden = !selectable;
+    authenticationSelect.value = selectable ? authenticationSelect.value : (provider?.authenticationType || 'Bearer token');
+    authenticationSelect.disabled = !selectable;
+    if (!selectable) {
+      let hidden = form.querySelector('input[type="hidden"][data-ai-fixed-auth]');
+      if (!hidden) { hidden = document.createElement('input'); hidden.type = 'hidden'; hidden.name = 'authenticationType'; hidden.dataset.aiFixedAuth = 'true'; form.append(hidden); }
+      hidden.value = authenticationSelect.value;
+    } else form.querySelector('[data-ai-fixed-auth]')?.remove();
+    const none = authenticationSelect.value === 'No authentication';
+    const header = authenticationSelect.value === 'API key header';
+    if (apiKey) apiKey.hidden = none;
+    if (apiKeyInput) apiKeyInput.required = Boolean(provider?.apiKeyRequired) && !none;
+    if (keyHeader) keyHeader.hidden = !header || (!selectable && Boolean(provider?.apiKeyHeaderName));
+    if (keyHeaderInput && provider?.apiKeyHeaderName) keyHeaderInput.value = provider.apiKeyHeaderName;
+  };
   const updateProvider = () => {
     const provider = aiCatalog.find(item => item.id === providerSelect?.value);
     if (!provider) return;
@@ -37,9 +75,42 @@ document.querySelectorAll('[data-ai-connection-form]').forEach((form, formIndex)
       const items = [provider.apiKeyUrl && ['Get API key', provider.apiKeyUrl], provider.documentationUrl && ['Documentation', provider.documentationUrl], provider.pricingUrl && ['Pricing', provider.pricingUrl]].filter(Boolean);
       links.innerHTML = items.map(([label, url]) => `<a href="${url}" target="_blank" rel="noopener">${label} ↗</a>`).join('');
     }
+    updateAuthentication(provider);
+    updateCapabilities(provider);
   };
   providerSelect?.addEventListener('change', updateProvider);
+  modelInput?.addEventListener('input', () => updateCapabilities(aiCatalog.find(item => item.id === providerSelect?.value)));
+  modelInput?.addEventListener('change', () => updateCapabilities(aiCatalog.find(item => item.id === providerSelect?.value)));
+  authenticationSelect?.addEventListener('change', () => updateAuthentication(aiCatalog.find(item => item.id === providerSelect?.value)));
   updateProvider();
+});
+
+document.querySelectorAll('[data-storage-connection-form]').forEach(form => {
+  const provider = form.querySelector('[data-storage-provider]');
+  const endpoint = form.querySelector('[data-storage-endpoint]');
+  const endpointInput = endpoint?.querySelector('input');
+  const session = form.querySelector('[data-storage-session]');
+  const pathStyle = form.querySelector('[data-storage-path-style]');
+  const links = form.querySelector('[data-storage-links]');
+  const updateStorageProvider = () => {
+    const value = provider?.value || 'Amazon S3';
+    const isAws = value === 'Amazon S3';
+    const isSpaces = value === 'DigitalOcean Spaces';
+    if (endpoint) endpoint.hidden = isAws;
+    if (endpointInput) {
+      endpointInput.required = value === 'S3 compatible';
+      endpointInput.placeholder = isSpaces ? 'Optional — inferred from region' : 'https://your-s3-endpoint.example';
+    }
+    if (session) session.hidden = !isAws;
+    if (pathStyle) pathStyle.hidden = value !== 'S3 compatible';
+    if (links) links.innerHTML = isSpaces
+      ? '<a href="https://cloud.digitalocean.com/account/api/spaces" target="_blank" rel="noopener">Create Spaces key ↗</a><a href="https://docs.digitalocean.com/products/spaces/how-to/manage-access/" target="_blank" rel="noopener">Documentation ↗</a><a href="https://www.digitalocean.com/pricing/spaces-object-storage" target="_blank" rel="noopener">Pricing ↗</a>'
+      : isAws
+        ? '<a href="https://console.aws.amazon.com/iam/home#/security_credentials" target="_blank" rel="noopener">AWS credentials ↗</a><a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/GetStartedWithS3.html" target="_blank" rel="noopener">Documentation ↗</a><a href="https://aws.amazon.com/s3/pricing/" target="_blank" rel="noopener">Pricing ↗</a>'
+        : '<a href="https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html" target="_blank" rel="noopener">S3 API documentation ↗</a>';
+  };
+  provider?.addEventListener('change', updateStorageProvider);
+  updateStorageProvider();
 });
 
 document.querySelectorAll('[data-model-capability]').forEach(checkbox => {
@@ -240,9 +311,11 @@ async function refreshPlanSteps() {
     const currentVersion = planStepsHost.querySelector('[data-plan-steps-version]')?.dataset.planStepsVersion;
     const nextVersion = next.querySelector('[data-plan-steps-version]')?.dataset.planStepsVersion;
     if (currentVersion === nextVersion) return;
-    const openSteps = new Set([...planStepsHost.querySelectorAll('details[open]')].map(item => item.querySelector('input[name="stepId"]')?.value).filter(Boolean));
+    const openSteps = new Set([...planStepsHost.querySelectorAll('.plan-step[open]')].map(item => item.querySelector('input[name="stepId"]')?.value).filter(Boolean));
+    const openPlans = new Set([...planStepsHost.querySelectorAll('.plan-board[open]')].map(item => item.dataset.planId));
     planStepsHost.innerHTML = html;
-    planStepsHost.querySelectorAll('details').forEach(item => { const id = item.querySelector('input[name="stepId"]')?.value; if (id && openSteps.has(id)) item.open = true; });
+    planStepsHost.querySelectorAll('.plan-step').forEach(item => { const id = item.querySelector('input[name="stepId"]')?.value; if (id && openSteps.has(id)) item.open = true; });
+    planStepsHost.querySelectorAll('.plan-board').forEach(item => { item.open = openPlans.has(item.dataset.planId); });
   } catch {
     // Keep the durable step log visible while the server is temporarily unavailable.
   } finally { planStepsRefreshing = false; }
@@ -665,6 +738,8 @@ if (projectSelector && selectedWorkspaceHost) {
   const loadSelectedProject = async ({ preservePosition = true } = {}) => {
     const option = projectSelector.selectedOptions[0];
     if (!option || projectLoadRunning) return;
+    const summary = document.querySelector('[data-file-project-summary]');
+    if (summary) summary.textContent = option.textContent || 'Project files';
     if (selectedWorkspaceHost.dataset.projectId === option.value && selectedWorkspaceHost.querySelector('[data-inline-file-workspace]')) return;
     projectLoadRunning = true;
     localStorage.setItem(storageKey, option.value);
