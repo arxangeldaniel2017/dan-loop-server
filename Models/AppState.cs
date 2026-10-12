@@ -2,7 +2,7 @@ namespace DanLoopServer.Models;
 
 public sealed class AppState
 {
-    public int Version { get; set; } = 15;
+    public int Version { get; set; } = 16;
     public List<AppUser> Users { get; set; } = [];
     public List<Project> Projects { get; set; } = [];
     public List<LoopDefinition> Loops { get; set; } = [];
@@ -27,6 +27,8 @@ public sealed class AppUser
     public string PasswordHash { get; set; } = "";
     public string Role { get; set; } = Roles.Member;
     public bool IsEnabled { get; set; } = true;
+    public int AccessFailedCount { get; set; }
+    public DateTimeOffset? LockoutEnd { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

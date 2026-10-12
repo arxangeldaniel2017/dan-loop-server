@@ -214,6 +214,15 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                     }
                     _state.Version = 15;
                 }
+                if (_state.Version < 16)
+                {
+                    foreach (var user in _state.Users)
+                    {
+                        user.AccessFailedCount = 0;
+                        user.LockoutEnd = null;
+                    }
+                    _state.Version = 16;
+                }
                 await SaveUnsafeAsync();
                 return;
             }
