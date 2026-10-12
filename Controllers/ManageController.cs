@@ -37,9 +37,68 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     public async Task<IActionResult> CreateLoop(Guid projectId, string name, string prompt, int intervalSeconds, int? maxExecutions, bool isEnabled = false)
     {
         if (!await CanAsync(projectId, manage: true)) return Forbid();
+        if (string.IsNullOrWhiteSpace(name)) return Back("Loop name is required.");
+        if (string.IsNullOrWhiteSpace(prompt)) return Back("Loop prompt is required.");
+        if (intervalSeconds is < 10 or > 2_592_000) return Back("Loop interval must be between 10 and 2,592,000 seconds.");
         if (maxExecutions is <= 0) return Back("Execution limit must be a positive number or left blank for unlimited.");
-        await store.UpdateAsync(state => { state.Loops.Add(new LoopDefinition { ProjectId = projectId, Name = name.Trim(), Prompt = prompt.Trim(), IntervalSeconds = Math.Clamp(intervalSeconds, 10, 2_592_000), MaxExecutions = maxExecutions, IsEnabled = isEnabled }); return true; });
+        await store.UpdateAsync(state => { state.Loops.Add(new LoopDefinition { ProjectId = projectId, Name = name.Trim(), Prompt = prompt.Trim(), IntervalSeconds = intervalSeconds, MaxExecutions = maxExecutions, IsEnabled = isEnabled }); return true; });
         return Back("Loop created.");
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> UpdateLoop(Guid id, string? name, string? prompt, int intervalSeconds, int? maxExecutions, bool isEnabled = false)
+    {
+        var loop = await store.ReadAsync(state => state.Loops.FirstOrDefault(item => item.Id == id));
+        if (loop is null) return NotFound();
+        if (!await CanAsync(loop.ProjectId, manage: true)) return Forbid();
+        if (string.IsNullOrWhiteSpace(name)) return Back("Loop name is required.");
+        if (string.IsNullOrWhiteSpace(prompt)) return Back("Loop prompt is required.");
+        if (intervalSeconds is < 10 or > 2_592_000) return Back("Loop interval must be between 10 and 2,592,000 seconds.");
+        if (maxExecutions is <= 0) return Back("Execution limit must be a positive number or left blank for unlimited.");
+
+        var result = await store.UpdateAsync(state =>
+        {
+            var current = state.Loops.First(item => item.Id == id);
+            var wasEnabled = current.IsEnabled;
+            current.Name = name.Trim();
+            current.Prompt = prompt.Trim();
+            current.IntervalSeconds = intervalSeconds;
+            current.MaxExecutions = maxExecutions;
+            current.IsEnabled = isEnabled;
+            if (!wasEnabled && current.IsEnabled) current.LastQueuedAt = null;
+
+            var affectedJobIds = new List<Guid>();
+            foreach (var job in state.Jobs.Where(item => item.LoopId == id && item.Status == JobStatuses.Queued))
+            {
+                job.Prompt = current.Prompt;
+                var conversation = state.Conversations.FirstOrDefault(item => item.Id == job.ConversationId);
+                if (conversation is not null)
+                {
+                    conversation.Title = current.Name;
+                    var message = conversation.Messages.FirstOrDefault(item => item.JobId == job.Id && item.Role == "user");
+                    if (message is not null) message.Content = current.Prompt;
+                }
+            }
+            if (!current.IsEnabled)
+            {
+                foreach (var job in state.Jobs.Where(item => item.LoopId == id && item.Status is JobStatuses.Queued or JobStatuses.Running))
+                {
+                    job.Status = JobStatuses.Cancelled;
+                    job.Error = "Cancelled because the recurring loop was stopped.";
+                    job.CompletedAt = DateTimeOffset.UtcNow;
+                    affectedJobIds.Add(job.Id);
+                }
+            }
+            var projectStillRunning = state.Loops.Any(item => item.ProjectId == current.ProjectId && item.IsEnabled);
+            return new { current.IsEnabled, current.ProjectId, ProjectStillRunning = projectStillRunning, JobIds = affectedJobIds };
+        });
+        foreach (var jobId in result.JobIds) cancellations.Cancel(jobId);
+        if (!result.IsEnabled)
+        {
+            await plans.CancelJobsAsync(result.JobIds, "Execution stopped because the recurring loop was disabled while editing it.");
+            if (!result.ProjectStillRunning) await plans.PauseProjectAsync(result.ProjectId, "Execution plan paused because all recurring loops for this project are stopped.");
+        }
+        return Back(result.IsEnabled ? "Loop changes saved." : $"Loop changes saved and loop stopped. {result.JobIds.Count} unfinished execution(s) cancelled.");
     }
 
     [HttpPost, ValidateAntiForgeryToken]

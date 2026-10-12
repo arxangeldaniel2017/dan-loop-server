@@ -72,6 +72,8 @@ The current execution client uses the OpenAI-compatible `POST /chat/completions`
 
 Configure a model in the **Models** tab, then select it as the project default. A recurring loop only queues when its project has a default model.
 
+For a fast, long-context OpenRouter connection, select **OpenRouter** and use the preconfigured `qwen/qwen3.5-35b-a3b` model (262K context). Use `deepseek/deepseek-v4-flash` when a 1M-token context window is more important. Keep the model URL at `https://openrouter.ai/api/v1`, leave authentication as **Bearer token**, and paste your own OpenRouter key into **API credential**. The credential is encrypted in the application database and is never stored in this repository.
+
 ## Git provider connections
 
 Projects can be linked to any number of repositories across GitHub, GitLab, Bitbucket Cloud, Codeberg, Gitea Cloud or self-hosted Gitea, SourceHut, AWS CodeCommit, Azure DevOps Repos, Google Cloud Secure Source Manager, and Gitee. Connections can be added during first-run setup or managed later in **Connections**.

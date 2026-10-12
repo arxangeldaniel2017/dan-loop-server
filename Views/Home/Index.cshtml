@@ -64,8 +64,22 @@
                 @foreach (var loop in loops)
                 {
                     <details class="loop-item" data-disclosure-id="loop-@loop.Id"><summary><span class="status @(loop.IsEnabled ? "online" : "")"></span><strong>@loop.Name</strong><small>every @loop.IntervalSeconds sec · @loop.ExecutionCount run@(loop.ExecutionCount == 1 ? "" : "s") · @(loop.LastQueuedAt?.ToLocalTime().ToString("g") ?? "not run") · limit @(loop.MaxExecutions?.ToString() ?? "unlimited")</small></summary><div class="loop-item-body"><p>@loop.Prompt</p>
-                        @if (CanManage(project.Id)) { <form asp-controller="Manage" asp-action="SetLoopExecutionLimit" method="post" class="loop-limit-form"><input type="hidden" name="id" value="@loop.Id"/><label>Execution limit<input name="maxExecutions" type="number" min="1" step="1" value="@loop.MaxExecutions" placeholder="Unlimited" /></label><button class="secondary">Save limit</button><small>Leave blank for unlimited retries.</small></form> }
-                        @if (CanManage(project.Id)) { <div class="actions">@if (loop.IsEnabled && CanRun(project.Id)) { <form asp-controller="Manage" asp-action="RunLoopNow" method="post"><input type="hidden" name="id" value="@loop.Id"/><button>Run now</button></form> }<form asp-controller="Manage" asp-action="ToggleLoop" method="post"><input type="hidden" name="id" value="@loop.Id"/><button class="secondary">@(loop.IsEnabled ? "Stop" : "Start")</button></form><form asp-controller="Manage" asp-action="DeleteLoop" method="post" onsubmit="return confirm('Delete this loop?')"><input type="hidden" name="id" value="@loop.Id"/><button class="danger">Delete</button></form></div> }
+                        @if (CanManage(project.Id))
+                        {
+                            <details class="loop-editor">
+                                <summary>Edit loop</summary>
+                                <form asp-controller="Manage" asp-action="UpdateLoop" method="post" class="form-grid compact">
+                                    <input type="hidden" name="id" value="@loop.Id"/>
+                                    <label>Name<input name="name" value="@loop.Name" maxlength="100" required/></label>
+                                    <label>Every (seconds)<input name="intervalSeconds" type="number" min="10" max="2592000" value="@loop.IntervalSeconds" required/><small class="field-help">Time between scheduled runs; minimum 10 seconds.</small></label>
+                                    <label>Execution limit<input name="maxExecutions" type="number" min="1" step="1" value="@loop.MaxExecutions" placeholder="Unlimited"/><small class="field-help">Leave blank for unlimited runs.</small></label>
+                                    <label class="check loop-enabled-check"><input type="checkbox" name="isEnabled" value="true" checked="@loop.IsEnabled"/> Enabled</label>
+                                    <label class="wide">Loop prompt<textarea name="prompt" rows="5" required>@loop.Prompt</textarea><small class="field-help">Used for future and currently queued runs. A running job keeps its original prompt.</small></label>
+                                    <button>Save all changes</button>
+                                </form>
+                            </details>
+                            <div class="actions loop-quick-actions">@if (loop.IsEnabled && CanRun(project.Id)) { <form asp-controller="Manage" asp-action="RunLoopNow" method="post"><input type="hidden" name="id" value="@loop.Id"/><button>Run now</button></form> }<form asp-controller="Manage" asp-action="ToggleLoop" method="post"><input type="hidden" name="id" value="@loop.Id"/><button class="secondary">@(loop.IsEnabled ? "Stop" : "Start")</button></form><form asp-controller="Manage" asp-action="DeleteLoop" method="post" onsubmit="return confirm('Delete this loop?')"><input type="hidden" name="id" value="@loop.Id"/><button class="danger">Delete</button></form></div>
+                        }
                     </div></details>
                 }
             </div>
