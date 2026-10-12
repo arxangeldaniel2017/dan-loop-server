@@ -3,7 +3,7 @@ using DanLoopServer.Models;
 
 namespace DanLoopServer.Services;
 
-public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore store, GitHubService gitHub, S3ObjectStorage objectStorage)
+public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore store, GitHubService gitHub, S3ObjectStorage objectStorage, AiGenerationService generation)
 {
     private static readonly HashSet<string> InternalFolders = new(StringComparer.OrdinalIgnoreCase) { ".git", ".history", ".trash", ".staging", ".undo" };
 
@@ -24,6 +24,7 @@ public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore sto
         {
             if (Allowed("write_file")) definitions.Add(Tool("write_file", "Create or replace one UTF-8 project file. Existing content is backed up inside the project workspace.", new { type = "object", properties = new { path = new { type = "string" }, content = new { type = "string" } }, required = new[] { "path", "content" } }));
             if (Allowed("replace_in_file")) definitions.Add(Tool("replace_in_file", "Replace exact text in one existing project file. The old text must occur exactly once.", new { type = "object", properties = new { path = new { type = "string" }, old_text = new { type = "string" }, new_text = new { type = "string" } }, required = new[] { "path", "old_text", "new_text" } }));
+            if (Allowed("generate_asset")) definitions.Add(Tool("generate_asset", "Generate an image, audio, video, or other file with an enabled AI connection and save it directly inside this project. The server chooses providers by capability and falls back by priority.", new { type = "object", properties = new { capability = new { type = "string", @enum = new[] { AiCapabilities.Image, AiCapabilities.Audio, AiCapabilities.Video, AiCapabilities.Files } }, prompt = new { type = "string" }, path = new { type = "string", description = "Project-relative destination path." } }, required = new[] { "capability", "prompt", "path" } }));
         }
         if (settings.AllowGitHubPublish && Allowed("publish_project_files"))
             definitions.Add(Tool("publish_project_files", "Commit selected project files to the project's assigned GitHub repository through the connected GitHub API. No terminal or local Git is used.", new { type = "object", properties = new { paths = new { type = "array", items = new { type = "string" } }, message = new { type = "string" } }, required = new[] { "paths", "message" } }));
@@ -71,6 +72,7 @@ public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore sto
                 "read_file" when settings.AllowFileRead => await ReadFileAsync(projectId, arguments, settings),
                 "write_file" when settings.AllowFileWrite => await WriteFileAsync(projectId, arguments),
                 "replace_in_file" when settings.AllowFileWrite => await ReplaceInFileAsync(projectId, arguments),
+                "generate_asset" when settings.AllowFileWrite => await generation.GenerateAsync(projectId, Required(arguments, "capability"), Required(arguments, "prompt"), Required(arguments, "path"), cancellationToken),
                 "publish_project_files" when settings.AllowGitHubPublish => await PublishProjectFilesAsync(projectId, arguments, cancellationToken),
                 "object_storage_status" => new AgentToolResult { Success = true, Summary = "Object storage status", Output = objectStorage.IsEnabled ? "S3-compatible project storage is active. This project's files are mirrored under its isolated project namespace." : "S3-compatible storage is not configured; this project is using local storage." },
                 "sync_project_storage" when objectStorage.IsEnabled => await SyncObjectStorageAsync(cancellationToken),

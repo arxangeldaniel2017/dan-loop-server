@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.DataProtection;
 
 namespace DanLoopServer.Services;
 
-public sealed class RemoteModelClient(HttpClient http, IDataProtectionProvider protectionProvider)
+public sealed class RemoteModelClient(HttpClient http, IDataProtectionProvider protectionProvider, AiGenerationService generation)
 {
     private readonly IDataProtector _protector = protectionProvider.CreateProtector("remote-model-api-keys-v1");
 
@@ -24,6 +24,7 @@ public sealed class RemoteModelClient(HttpClient http, IDataProtectionProvider p
 
     public async Task<string> TestAsync(RemoteModel model, CancellationToken cancellationToken)
     {
+        if (model.ApiProtocol == AiApiProtocols.NativeGeneration) return await generation.TestAsync(model, cancellationToken);
         if (AnthropicProtocol.Handles(model))
         {
             var messages = new object[] { new { role = "user", content = "Reply with OK." } };

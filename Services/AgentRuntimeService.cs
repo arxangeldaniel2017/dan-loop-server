@@ -138,7 +138,7 @@ CURRENT PROJECT GUIDE:
         // existing project files, then require implementation instead of allowing an unbounded
         // read/discuss loop over historical reports.
         if (planExisted && (forceImplementationAction || stepNumber >= 3 || changedPaths.Count > 0) && (!implementationChanged || !planChanged))
-            return (new HashSet<string>(["write_file", "replace_in_file"], StringComparer.OrdinalIgnoreCase), null, true, true, 4096);
+            return (new HashSet<string>(["write_file", "replace_in_file", "generate_asset"], StringComparer.OrdinalIgnoreCase), null, true, true, 4096);
         if (requirePublishing && unpublishedPaths.Count > 0)
             return (new HashSet<string>(["publish_project_files"], StringComparer.OrdinalIgnoreCase), "publish_project_files", false, true, 2048);
         return (null, null, false, true, 4096);
@@ -174,7 +174,7 @@ CURRENT PROJECT GUIDE:
         {
             using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson);
             var arguments = document.RootElement;
-            if (result.Mutated && (call.Name.Equals("write_file", StringComparison.OrdinalIgnoreCase) || call.Name.Equals("replace_in_file", StringComparison.OrdinalIgnoreCase)))
+            if (result.Mutated && (call.Name.Equals("write_file", StringComparison.OrdinalIgnoreCase) || call.Name.Equals("replace_in_file", StringComparison.OrdinalIgnoreCase) || call.Name.Equals("generate_asset", StringComparison.OrdinalIgnoreCase)))
             {
                 if (arguments.TryGetProperty("path", out var pathValue) && pathValue.ValueKind == JsonValueKind.String)
                 {

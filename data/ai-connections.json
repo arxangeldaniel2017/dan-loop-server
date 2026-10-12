@@ -218,7 +218,7 @@
   {
     "id": "elevenlabs", "name": "ElevenLabs", "category": "Model developer", "apiProtocol": "Native generation", "baseUrl": "https://api.elevenlabs.io/v1", "authenticationType": "API key header", "apiKeyHeaderName": "xi-api-key", "iconUrl": "https://elevenlabs.io/favicon.ico",
     "apiKeyUrl": "https://elevenlabs.io/app/settings/api-keys", "documentationUrl": "https://elevenlabs.io/docs/api-reference", "pricingUrl": "https://elevenlabs.io/pricing",
-    "models": [{ "id": "eleven_multilingual_v2", "name": "Eleven Multilingual v2", "capabilities": ["Generator", "Audio", "Files"] }, { "id": "custom", "name": "Other ElevenLabs model", "capabilities": ["Generator", "Audio", "Files"] }]
+    "models": [{ "id": "21m00Tcm4TlvDq8ikWAM|eleven_multilingual_v2", "name": "Multilingual v2 · default voice", "capabilities": ["Generator", "Audio", "Files"] }, { "id": "custom", "name": "Voice ID|Model ID", "capabilities": ["Generator", "Audio", "Files"] }]
   },
   {
     "id": "vertex", "name": "Google Vertex AI", "category": "Cloud AI platform", "baseUrl": "", "requiresBaseUrl": true, "iconUrl": "https://cloud.google.com/favicon.ico",
