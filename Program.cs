@@ -39,8 +39,10 @@ builder.Services.AddHttpClient<RemoteModelClient>(client => client.Timeout = Tim
 builder.Services.AddHttpClient<AiModelDiscoveryService>(client => client.Timeout = TimeSpan.FromSeconds(45));
 builder.Services.AddHttpClient<AiGenerationService>(client => client.Timeout = TimeSpan.FromMinutes(10));
 builder.Services.AddHttpClient<AgentRuntimeClient>(client => client.Timeout = TimeSpan.FromMinutes(15));
+builder.Services.AddHttpClient(nameof(BunnyStorageClient), client => client.Timeout = TimeSpan.FromMinutes(15));
 builder.Services.AddSingleton<AgentRuntimeService>();
 builder.Services.AddHttpClient<GitHubService>(client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddHttpClient<GitProviderService>(client => client.Timeout = TimeSpan.FromSeconds(45));
 builder.Services.AddHostedService<JobWorker>();
 builder.Services.AddHostedService<GitHubSyncWorker>();
 builder.Services.AddHostedService<S3SyncWorker>();

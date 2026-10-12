@@ -9,14 +9,14 @@ public sealed class S3SyncWorker(S3ObjectStorage storage, ILogger<S3SyncWorker> 
         {
             try { if (storage.IsEnabled) await storage.SyncAsync(stoppingToken); }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
-            catch (Exception ex) { logger.LogError(ex, "S3-compatible project storage synchronization failed; it will retry automatically"); }
+            catch (Exception ex) { logger.LogError(ex, "Object-storage project synchronization failed; it will retry automatically"); }
         }
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         try { if (storage.IsEnabled) await storage.SyncAsync(cancellationToken); }
-        catch (Exception ex) { logger.LogError(ex, "Final S3-compatible project storage synchronization failed"); }
+        catch (Exception ex) { logger.LogError(ex, "Final object-storage project synchronization failed"); }
         await base.StopAsync(cancellationToken);
     }
 }

@@ -31,19 +31,14 @@ public sealed class AccountController(StateStore store, PasswordService password
         });
         if (user is null) return RedirectToAction(nameof(Login));
         await SignInAsync(user);
-        return RedirectToAction(nameof(ConfigureModel));
+        return RedirectToAction(nameof(CreateProject));
     }
 
     [Authorize(Roles = Roles.Admin), HttpGet]
-    public async Task<IActionResult> ConfigureModel()
-    {
-        ViewBag.Catalog = await store.ReadAsync(state => state.AiProviderCatalog);
-        ViewBag.Models = await store.ReadAsync(state => state.Models);
-        return View();
-    }
+    public IActionResult ConfigureModel() => RedirectToAction(nameof(Connections));
 
     [Authorize(Roles = Roles.Admin), HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> ConfigureModel(string? name, string? modelId, string? baseUrl, string? apiKey, string? providerId, List<string>? capabilities, string? authenticationType, string? apiKeyHeaderName, bool addAnother = false)
+    public async Task<IActionResult> ConfigureModel(string? name, string? modelId, string? baseUrl, string? apiKey, string? providerId, List<string>? capabilities, string? authenticationType, string? apiKeyHeaderName, bool addAnother = false, string? returnUrl = null)
     {
         name = name?.Trim() ?? "";
         modelId = modelId?.Trim() ?? "";
@@ -55,12 +50,11 @@ public sealed class AccountController(StateStore store, PasswordService password
             ModelState.AddModelError("", "A valid HTTP(S) model URL is required.");
         if (!ModelState.IsValid)
         {
-            ViewBag.Catalog = await store.ReadAsync(state => state.AiProviderCatalog);
-            ViewBag.Models = await store.ReadAsync(state => state.Models);
-            return View();
+            await LoadConnectionsOptionsAsync();
+            return View(nameof(Connections));
         }
 
-        await store.UpdateAsync(state =>
+        var created = await store.UpdateAsync(state =>
         {
             var provider = string.IsNullOrWhiteSpace(providerId) ? "custom" : providerId.Trim();
             var model = new RemoteModel
@@ -75,17 +69,17 @@ public sealed class AccountController(StateStore store, PasswordService password
             };
             AiConnectionCatalogService.ApplyProviderAuthentication(state.AiProviderCatalog, model, authenticationType, apiKeyHeaderName);
             state.Models.Add(model);
-            return true;
+            foreach (var project in state.Projects.Where(item => item.DefaultModelId is null)) project.DefaultModelId = model.Id;
+            return model;
         });
-        return addAnother ? RedirectToAction(nameof(ConfigureModel)) : RedirectToAction("Setup", "GitHub");
+        TempData["Message"] = $"AI connection {created.Name} added and available as a project default.";
+        if (Url.IsLocalUrl(returnUrl)) return LocalRedirect(returnUrl!);
+        return Redirect("/Account/Connections#ai");
     }
 
     [Authorize(Roles = Roles.Admin), HttpGet]
     public async Task<IActionResult> CreateProject()
-    {
-        await LoadProjectSetupOptionsAsync();
-        return View();
-    }
+        => View();
 
     [Authorize(Roles = Roles.Admin), HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId, long[]? repositoryIds)
@@ -94,7 +88,6 @@ public sealed class AccountController(StateStore store, PasswordService password
         if (string.IsNullOrWhiteSpace(name))
         {
             ModelState.AddModelError("", "Project name is required.");
-            await LoadProjectSetupOptionsAsync();
             return View();
         }
 
@@ -122,18 +115,29 @@ public sealed class AccountController(StateStore store, PasswordService password
                 });
             return true;
         });
-        return RedirectToAction("Index", "Home");
+        return RedirectToAction(nameof(Connections));
     }
 
-    private async Task LoadProjectSetupOptionsAsync()
+    [Authorize(Roles = Roles.Admin), HttpGet]
+    public async Task<IActionResult> Connections()
+    {
+        await LoadConnectionsOptionsAsync();
+        return View();
+    }
+
+    private async Task LoadConnectionsOptionsAsync()
     {
         var options = await store.ReadAsync(state => new
         {
-            Models = state.Models.Where(x => x.IsEnabled).ToList(),
-            Connections = state.GitHubConnections
+            Catalog = state.AiProviderCatalog,
+            Models = state.Models.ToList(),
+            GitConnections = state.GitHubConnections.ToList(),
+            StorageConnections = state.ObjectStorageConnections.ToList()
         });
+        ViewBag.Catalog = options.Catalog;
         ViewBag.Models = options.Models;
-        ViewBag.GitHubConnections = options.Connections;
+        ViewBag.GitHubConnections = options.GitConnections;
+        ViewBag.ObjectStorageConnections = options.StorageConnections;
     }
 
     [AllowAnonymous, HttpGet]

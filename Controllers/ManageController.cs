@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace DanLoopServer.Controllers;
 
 [Authorize]
-public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, AiModelDiscoveryService modelDiscovery, WorkspaceService workspace, GitHubService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations, S3ObjectStorage objectStorage) : Controller
+public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, AiModelDiscoveryService modelDiscovery, WorkspaceService workspace, GitProviderService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations, S3ObjectStorage objectStorage) : Controller
 {
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId)
@@ -225,20 +225,20 @@ public sealed class ManageController(StateStore store, PasswordService passwords
                 ? state.GitHubConnections.SelectMany(connection => connection.Repositories.Select(repository => new { Connection = connection, Repository = repository, Project = project })).FirstOrDefault(x => x.Repository.Id == repositoryId)
                 : null;
         });
-        if (target is null) return Back("Select a GitHub result destination for this project first.");
+        if (target is null) return Back("Select a Git result destination for this project first.");
 
         try
         {
             var localFolder = await workspace.ResolveProjectPathAsync(job.ProjectId, job.ResultFolder);
             var resultName = Path.GetFileName(job.ResultFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
             var commitUrl = await gitHub.PushResultFolderAsync(target.Connection, target.Repository, localFolder, StateStore.ProjectRepositoryFolder(target.Project), resultName, cancellationToken);
-            await store.UpdateAsync(state => { var current = state.Jobs.First(x => x.Id == id); current.ResultsCommitUrl = commitUrl; current.ResultsPushError = ""; state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = MessageLevels.Info, Text = "GitHub result push completed." }); return true; });
-            return Back("GitHub push completed.");
+            await store.UpdateAsync(state => { var current = state.Jobs.First(x => x.Id == id); current.ResultsCommitUrl = commitUrl; current.ResultsPushError = ""; state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = MessageLevels.Info, Text = "Git result push completed." }); return true; });
+            return Back("Git push completed.");
         }
         catch (Exception ex)
         {
-            await store.UpdateAsync(state => { var current = state.Jobs.First(x => x.Id == id); current.ResultsPushError = ex.Message; state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = MessageLevels.Warning, Text = $"GitHub result push failed: {ex.Message}" }); return true; });
-            return Back("GitHub push failed: " + ex.Message);
+            await store.UpdateAsync(state => { var current = state.Jobs.First(x => x.Id == id); current.ResultsPushError = ex.Message; state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = MessageLevels.Warning, Text = $"Git result push failed: {ex.Message}" }); return true; });
+            return Back("Git push failed: " + ex.Message);
         }
     }
 
@@ -372,14 +372,16 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
-    public async Task<IActionResult> CreateStorageConnection(string name, string provider, string? endpoint, string? region, string bucket, string? prefix, string accessKey, string secretKey, string? sessionToken, bool forcePathStyle = false, bool isEnabled = false)
+    public async Task<IActionResult> CreateStorageConnection(string name, string provider, string? endpoint, string? region, string bucket, string? prefix, string accessKey, string secretKey, string? sessionToken, bool forcePathStyle = false, bool isEnabled = false, string? returnUrl = null)
     {
-        if (!ObjectStorageProviders.All.Contains(provider)) return Connections("Unknown object-storage provider.");
-        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(bucket)) return Connections("Connection name and bucket are required.");
-        if (string.IsNullOrWhiteSpace(accessKey) || string.IsNullOrWhiteSpace(secretKey)) return Connections("Access key and secret key are required.");
-        region = string.IsNullOrWhiteSpace(region) ? "us-east-1" : region.Trim();
-        endpoint = StorageEndpoint(provider, endpoint, region);
-        if (provider == ObjectStorageProviders.S3Compatible && !ValidEndpoint(endpoint)) return Connections("A valid HTTP(S) endpoint is required for an S3-compatible service.");
+        if (!ObjectStorageProviders.All.Contains(provider)) return Connections("Unknown object-storage provider.", returnUrl);
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(bucket)) return Connections("Connection name and bucket are required.", returnUrl);
+        if (string.IsNullOrWhiteSpace(accessKey) || (!ObjectStorageProviders.IsBunny(provider) && string.IsNullOrWhiteSpace(secretKey)))
+            return Connections(ObjectStorageProviders.IsBunny(provider) ? "The storage-zone API password is required." : "Access key and secret key are required.", returnUrl);
+        region = string.IsNullOrWhiteSpace(region) ? ObjectStorageProviders.DefaultRegion(provider) : region.Trim();
+        endpoint = ObjectStorageProviders.ResolveEndpoint(provider, endpoint, region, accessKey);
+        if ((!string.IsNullOrWhiteSpace(endpoint) && !ValidEndpoint(endpoint)) || (ObjectStorageProviders.EndpointIsRequired(provider) && !ValidEndpoint(endpoint)))
+            return Connections($"A valid HTTP(S) endpoint is required for {provider}.", returnUrl);
         await store.UpdateAsync(state =>
         {
             if (isEnabled) foreach (var existing in state.ObjectStorageConnections) existing.IsEnabled = false;
@@ -388,28 +390,29 @@ public sealed class ManageController(StateStore store, PasswordService passwords
                 Name = name.Trim(), Provider = provider, Endpoint = endpoint, Region = region, Bucket = bucket.Trim(),
                 Prefix = string.IsNullOrWhiteSpace(prefix) ? "dan-loop/projects" : prefix.Trim().Trim('/'),
                 ProtectedAccessKey = objectStorage.ProtectSecret(accessKey), ProtectedSecretKey = objectStorage.ProtectSecret(secretKey),
-                ProtectedSessionToken = objectStorage.ProtectSecret(sessionToken ?? ""), ForcePathStyle = forcePathStyle, IsEnabled = isEnabled
+                ProtectedSessionToken = objectStorage.ProtectSecret(sessionToken ?? ""), ForcePathStyle = forcePathStyle || ObjectStorageProviders.DefaultForcePathStyle(provider), IsEnabled = isEnabled
             });
             return true;
         });
         await objectStorage.RefreshAsync();
-        return Connections("Object-storage connection added.");
+        return Connections("Object-storage connection added.", returnUrl);
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> UpdateStorageConnection(Guid id, string name, string provider, string? endpoint, string? region, string bucket, string? prefix, string? accessKey, string? secretKey, string? sessionToken, bool forcePathStyle = false)
     {
         if (!ObjectStorageProviders.All.Contains(provider)) return Connections("Unknown object-storage provider.");
-        region = string.IsNullOrWhiteSpace(region) ? "us-east-1" : region.Trim();
-        endpoint = StorageEndpoint(provider, endpoint, region);
+        region = string.IsNullOrWhiteSpace(region) ? ObjectStorageProviders.DefaultRegion(provider) : region.Trim();
+        endpoint = ObjectStorageProviders.ResolveEndpoint(provider, endpoint, region, accessKey);
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(bucket)) return Connections("Connection name and bucket are required.");
-        if (provider == ObjectStorageProviders.S3Compatible && !ValidEndpoint(endpoint)) return Connections("A valid HTTP(S) endpoint is required for an S3-compatible service.");
+        if ((!string.IsNullOrWhiteSpace(endpoint) && !ValidEndpoint(endpoint)) || (ObjectStorageProviders.EndpointIsRequired(provider) && !ValidEndpoint(endpoint)))
+            return Connections($"A valid HTTP(S) endpoint is required for {provider}.");
         await store.UpdateAsync(state =>
         {
             var connection = state.ObjectStorageConnections.First(item => item.Id == id);
             connection.Name = name.Trim(); connection.Provider = provider; connection.Endpoint = endpoint; connection.Region = region;
             connection.Bucket = bucket.Trim(); connection.Prefix = string.IsNullOrWhiteSpace(prefix) ? "dan-loop/projects" : prefix.Trim().Trim('/');
-            connection.ForcePathStyle = forcePathStyle;
+            connection.ForcePathStyle = forcePathStyle || ObjectStorageProviders.DefaultForcePathStyle(provider);
             if (!string.IsNullOrWhiteSpace(accessKey)) connection.ProtectedAccessKey = objectStorage.ProtectSecret(accessKey);
             if (!string.IsNullOrWhiteSpace(secretKey)) connection.ProtectedSecretKey = objectStorage.ProtectSecret(secretKey);
             if (!string.IsNullOrWhiteSpace(sessionToken)) connection.ProtectedSessionToken = objectStorage.ProtectSecret(sessionToken);
@@ -561,15 +564,9 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     private static List<string> NormalizeCapabilities(IEnumerable<string>? capabilities) =>
         (capabilities ?? []).Where(AiCapabilities.All.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-    private static string StorageEndpoint(string provider, string? endpoint, string region) => provider switch
-    {
-        ObjectStorageProviders.AmazonS3 => "",
-        ObjectStorageProviders.DigitalOceanSpaces when string.IsNullOrWhiteSpace(endpoint) => $"https://{region}.digitaloceanspaces.com",
-        _ => endpoint?.Trim().TrimEnd('/') ?? ""
-    };
     private static bool ValidEndpoint(string endpoint) => Uri.TryCreate(endpoint, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 
-    private IActionResult Connections(string message) { TempData["Message"] = message; return Redirect("/#connections"); }
+    private IActionResult Connections(string message, string? returnUrl = null) { TempData["Message"] = message; return Url.IsLocalUrl(returnUrl) ? LocalRedirect(returnUrl!) : Redirect("/#connections"); }
     private IActionResult Users(string message) { TempData["Message"] = message; return Redirect("/#access"); }
     private IActionResult Back(string message) { TempData["Message"] = message; return RedirectToAction("Index", "Home"); }
 }

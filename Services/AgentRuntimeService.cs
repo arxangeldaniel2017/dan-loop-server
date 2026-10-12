@@ -90,7 +90,7 @@ public sealed class AgentRuntimeService(AgentRuntimeClient client, AgentToolExec
             ? $"""
 
               WORKFLOW PHASE — IMPLEMENT ONE PLAN STEP:
-              A root PLAN.md already exists and its current content is included below. The server has assigned this step: {(string.IsNullOrWhiteSpace(job.PlanStepTitle) ? "the first eligible unchecked task" : job.PlanStepTitle)}. Implement only that server-assigned step now with write_file, replace_in_file, or generate_asset when a generated asset is required. Then update PLAN.md to mark the task complete and record the files changed. Do not merely discuss, redesign, or rewrite the plan. A successful run requires at least one meaningful source, test, configuration, documentation, or generated asset file plus an updated PLAN.md. Files under results, bin, obj, temporary folders, and files named placeholder do not count as implementation.{(requirePublishing ? " Publish every changed path together with publish_project_files before finishing." : " GitHub is not connected, so keep the verified changes in the local project workspace and finish without publishing.")}
+              A root PLAN.md already exists and its current content is included below. The server has assigned this step: {(string.IsNullOrWhiteSpace(job.PlanStepTitle) ? "the first eligible unchecked task" : job.PlanStepTitle)}. Implement only that server-assigned step now with write_file, replace_in_file, or generate_asset when a generated asset is required. Then update PLAN.md to mark the task complete and record the files changed. Do not merely discuss, redesign, or rewrite the plan. A successful run requires at least one meaningful source, test, configuration, documentation, or generated asset file plus an updated PLAN.md. Files under results, bin, obj, temporary folders, and files named placeholder do not count as implementation.{(requirePublishing ? " Publish every changed path together with publish_project_files before finishing." : " A Git provider is not connected, so keep the verified changes in the local project workspace and finish without publishing.")}
 
               CURRENT PLAN.md:
               {planContent}
@@ -108,7 +108,7 @@ You can access only folders and files that belong to this project workspace. Use
 
 Shells, terminals, Bash, command execution, programs, scripts, builds, tests, package managers, local Git, local commits, local pushes, server file listings, secrets, and every path outside this project are unavailable. Never request or emit a Bash or terminal tool call, including XML tool-call markup. Never try to bypass a blocked tool.
 
-GitHub publishing is handled automatically in background batches when this project has an assigned connected repository and permission. Do not call publish_project_files unless the user explicitly requests an immediate publish. Never use Git commands. Use workspace_guide or browse_folder to understand project-relative directories, then read or edit individual project files. Describe anything you cannot verify without command execution honestly.
+Git publishing is handled automatically in background batches when this project has an assigned connected repository and permission. Do not call publish_project_files unless the user explicitly requests an immediate publish. Never use Git commands. Use workspace_guide or browse_folder to understand project-relative directories, then read or edit individual project files. Describe anything you cannot verify without command execution honestly.
 
 CURRENT PROJECT GUIDE:
 """ + workspaceGuide + workflow;
@@ -153,7 +153,7 @@ CURRENT PROJECT GUIDE:
         if (planExisted && !implementationChanged)
             return (null, "No implementation file was created or changed; only planning activity was performed.");
         if (requirePublishing && unpublishedPaths.Count > 0)
-            return (null, $"The following changed files were not published through GitHub: {string.Join(", ", unpublishedPaths.OrderBy(path => path))}.");
+            return (null, $"The following changed files were not published through the Git provider: {string.Join(", ", unpublishedPaths.OrderBy(path => path))}.");
         return (planExisted || implementationChanged ? AgentRunOutcomes.ChangesCompleted : AgentRunOutcomes.PlanCreated, null);
     }
 
@@ -245,7 +245,7 @@ CURRENT PROJECT GUIDE:
             ProjectId = projectId,
             JobId = jobId,
             Level = MessageLevels.Warning,
-            Text = $"GitHub publishing is unavailable, so this job is continuing in the local project workspace. {Limit(reason, 500)}"
+            Text = $"Git publishing is unavailable, so this job is continuing in the local project workspace. {Limit(reason, 500)}"
         });
         return true;
     });

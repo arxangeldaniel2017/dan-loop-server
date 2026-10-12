@@ -162,20 +162,20 @@
     }
     </div>
     <section class="connection-subsection">
-        <div class="section-title"><div><p class="eyebrow">OBJECT STORAGE</p><h2>S3 / Spaces</h2><p class="muted">Save several storage connections and activate the one that should mirror project files.</p></div><span class="pill">@(Model.State.ObjectStorageConnections.Any(item => item.IsEnabled) ? "active" : "local fallback")</span></div>
+        <div class="section-title"><div><p class="eyebrow">OBJECT STORAGE</p><h2>Cloud object storage</h2><p class="muted">Mirror every project through S3-compatible storage, Google Cloud Storage, Azure Blob Storage, or Bunny Storage.</p></div><span class="pill">@(Model.State.ObjectStorageConnections.Any(item => item.IsEnabled) ? "active" : "local fallback")</span></div>
         <details class="create-box connection-creator"><summary>＋ Add object-storage connection</summary>
             <form asp-controller="Manage" asp-action="CreateStorageConnection" method="post" class="form-grid" data-storage-connection-form>
-                <label>Connection type<select name="provider" data-storage-provider>@foreach (var provider in ObjectStorageProviders.All) { <option value="@provider">@provider</option> }</select></label>
+                <label>Provider<select name="provider" data-storage-provider data-icon-select>@foreach (var provider in ObjectStorageProviders.All) { <option value="@provider" data-default-region="@ObjectStorageProviders.DefaultRegion(provider)" data-endpoint-required="@ObjectStorageProviders.EndpointIsRequired(provider).ToString().ToLowerInvariant()" data-kind="@(ObjectStorageProviders.IsAzure(provider) ? "azure" : ObjectStorageProviders.IsBunny(provider) ? "bunny" : "s3")" data-session="@ObjectStorageProviders.SupportsSessionToken(provider).ToString().ToLowerInvariant()" data-force-path="@ObjectStorageProviders.DefaultForcePathStyle(provider).ToString().ToLowerInvariant()" data-docs="@ObjectStorageProviders.DocumentationUrl(provider)">@provider</option> }</select></label>
                 <label>Display name<input name="name" required placeholder="Project storage" /></label>
-                <label>Bucket<input name="bucket" required autocomplete="off" /></label>
-                <label data-storage-region>Region<input name="region" value="us-east-1" required /></label>
+                <label><span data-storage-container-label>Bucket</span><input name="bucket" required autocomplete="off" /></label>
+                <label data-storage-region>Region<input name="region" value="us-east-1" /></label>
                 <label class="wide" data-storage-endpoint hidden>Endpoint<input name="endpoint" type="url" placeholder="https://region.digitaloceanspaces.com" /></label>
                 <label class="wide">Folder prefix<input name="prefix" value="dan-loop/projects" /><small>All project namespaces are stored below this folder.</small></label>
-                <label>Access key<input name="accessKey" type="password" required autocomplete="off" /></label>
-                <label>Secret key<input name="secretKey" type="password" required autocomplete="off" /></label>
+                <label><span data-storage-access-label>Access key</span><input name="accessKey" type="password" required autocomplete="off" /></label>
+                <label data-storage-secret><span data-storage-secret-label>Secret key</span><input name="secretKey" type="password" required autocomplete="off" /></label>
                 <label data-storage-session>Session token<input name="sessionToken" type="password" autocomplete="off" placeholder="Optional" /></label>
                 <label class="check" data-storage-path-style hidden><input type="checkbox" name="forcePathStyle" value="true" /> Force path-style URLs</label>
-                <div class="wide provider-links" data-storage-links><a href="https://aws.amazon.com/s3/pricing/" target="_blank" rel="noopener">Pricing ↗</a><a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/GetStartedWithS3.html" target="_blank" rel="noopener">Documentation ↗</a></div>
+                <div class="wide provider-links" data-storage-links><a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/GetStartedWithS3.html" target="_blank" rel="noopener">Provider documentation ↗</a></div>
                 <label class="check"><input type="checkbox" name="isEnabled" value="true" checked /> Active</label><button>Add storage connection</button>
             </form>
         </details>
@@ -186,32 +186,59 @@
             <details class="connection-card @(storage.IsEnabled ? "active" : "inactive")">
                 <summary><label class="connection-select"><input form="bulk-storage-connections" type="checkbox" name="selectedIds" value="@storage.Id" aria-label="Select @storage.Name" /></label><span class="status @(storage.IsEnabled ? "online" : "")"></span><div><h3>@storage.Name</h3><p>@storage.Provider · <code>@storage.Bucket</code></p></div><span class="pill">@(storage.IsEnabled ? "active" : "inactive")</span></summary>
                 <div class="connection-meta"><span>@(string.IsNullOrWhiteSpace(storage.Endpoint) ? $"AWS · {storage.Region}" : storage.Endpoint)</span><span>Prefix: @storage.Prefix</span><span>Test: @storage.LastTestStatus@(storage.LastTestedAt is null ? "" : $" · {storage.LastTestedAt.Value.ToLocalTime():g}")</span>@if (!string.IsNullOrWhiteSpace(storage.LastTestMessage)) { <small>@storage.LastTestMessage</small> }</div>
-                <div class="actions"><form asp-controller="Manage" asp-action="TestStorageConnection" method="post"><input type="hidden" name="id" value="@storage.Id"/><button class="secondary">Test connection</button></form><form asp-controller="Manage" asp-action="ToggleStorageConnection" method="post"><input type="hidden" name="id" value="@storage.Id"/><button class="secondary">@(storage.IsEnabled ? "Deactivate" : "Activate")</button></form><details><summary>Edit</summary><form asp-controller="Manage" asp-action="UpdateStorageConnection" method="post" class="form-grid compact" data-storage-connection-form><input type="hidden" name="id" value="@storage.Id"/><label>Type<select name="provider" data-storage-provider>@foreach (var provider in ObjectStorageProviders.All) { <option value="@provider" selected="@(provider == storage.Provider)">@provider</option> }</select></label><label>Name<input name="name" value="@storage.Name" required /></label><label>Bucket<input name="bucket" value="@storage.Bucket" required /></label><label data-storage-region>Region<input name="region" value="@storage.Region" required /></label><label class="wide" data-storage-endpoint>Endpoint<input name="endpoint" type="url" value="@storage.Endpoint" /></label><label class="wide">Folder prefix<input name="prefix" value="@storage.Prefix" /></label><label>New access key<input name="accessKey" type="password" placeholder="Keep current" /></label><label>New secret key<input name="secretKey" type="password" placeholder="Keep current" /></label><label data-storage-session>New session token<input name="sessionToken" type="password" placeholder="Keep current" /></label><label class="check" data-storage-path-style><input type="checkbox" name="forcePathStyle" value="true" checked="@storage.ForcePathStyle" /> Force path-style URLs</label><button>Save</button></form></details><form asp-controller="Manage" asp-action="DeleteStorageConnection" method="post" onsubmit="return confirm('Delete this storage connection? Files already stored remotely will not be deleted.')"><input type="hidden" name="id" value="@storage.Id"/><button class="link-danger">Delete</button></form></div>
+                <div class="actions"><form asp-controller="Manage" asp-action="TestStorageConnection" method="post"><input type="hidden" name="id" value="@storage.Id"/><button class="secondary">Test connection</button></form><form asp-controller="Manage" asp-action="ToggleStorageConnection" method="post"><input type="hidden" name="id" value="@storage.Id"/><button class="secondary">@(storage.IsEnabled ? "Deactivate" : "Activate")</button></form><details><summary>Edit</summary><form asp-controller="Manage" asp-action="UpdateStorageConnection" method="post" class="form-grid compact" data-storage-connection-form><input type="hidden" name="id" value="@storage.Id"/><label>Provider<select name="provider" data-storage-provider data-icon-select>@foreach (var provider in ObjectStorageProviders.All) { <option value="@provider" selected="@(provider == storage.Provider)" data-default-region="@ObjectStorageProviders.DefaultRegion(provider)" data-endpoint-required="@ObjectStorageProviders.EndpointIsRequired(provider).ToString().ToLowerInvariant()" data-kind="@(ObjectStorageProviders.IsAzure(provider) ? "azure" : ObjectStorageProviders.IsBunny(provider) ? "bunny" : "s3")" data-session="@ObjectStorageProviders.SupportsSessionToken(provider).ToString().ToLowerInvariant()" data-force-path="@ObjectStorageProviders.DefaultForcePathStyle(provider).ToString().ToLowerInvariant()" data-docs="@ObjectStorageProviders.DocumentationUrl(provider)">@provider</option> }</select></label><label>Name<input name="name" value="@storage.Name" required /></label><label><span data-storage-container-label>Bucket</span><input name="bucket" value="@storage.Bucket" required /></label><label data-storage-region>Region<input name="region" value="@storage.Region" /></label><label class="wide" data-storage-endpoint>Endpoint<input name="endpoint" type="url" value="@storage.Endpoint" /></label><label class="wide">Folder prefix<input name="prefix" value="@storage.Prefix" /></label><label><span data-storage-access-label>New access key</span><input name="accessKey" type="password" placeholder="Keep current" /></label><label data-storage-secret><span data-storage-secret-label>New secret key</span><input name="secretKey" type="password" placeholder="Keep current" /></label><label data-storage-session>New session token<input name="sessionToken" type="password" placeholder="Keep current" /></label><label class="check" data-storage-path-style><input type="checkbox" name="forcePathStyle" value="true" checked="@storage.ForcePathStyle" /> Force path-style URLs</label><div class="wide provider-links" data-storage-links></div><button>Save</button></form></details><form asp-controller="Manage" asp-action="DeleteStorageConnection" method="post" onsubmit="return confirm('Delete this storage connection? Files already stored remotely will not be deleted.')"><input type="hidden" name="id" value="@storage.Id"/><button class="link-danger">Delete</button></form></div>
             </details>
         }
         </div>
         @if (!Model.State.ObjectStorageConnections.Any()) { <div class="empty">No object-storage connection yet. Project files remain safely available in local storage.</div> }
     </section>
     <div class="connection-subsection">
-    <div class="section-title"><div><p class="eyebrow">SOURCE CONTROL & AUTOMATION</p><h2>GitHub connections</h2></div><a class="button secondary" asp-controller="Export" asp-action="GitHub">Export CSV</a></div>
-    <details class="create-box"><summary>＋ Connect with fine-grained token</summary>
+    <div class="section-title"><div><p class="eyebrow">SOURCE CONTROL & AUTOMATION</p><h2>Git provider connections</h2></div><a class="button secondary" asp-controller="Export" asp-action="GitHub">Export CSV</a></div>
+    <details class="create-box"><summary>＋ Connect a Git provider</summary>
         <form asp-controller="GitHub" asp-action="ConnectToken" method="post" class="form-grid compact">
             <input type="hidden" name="returnUrl" value="/#connections" />
-            <label class="wide">Fine-grained access token<input name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="github_pat_…" /></label>
-            <p class="wide form-help"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token on GitHub ↗</a>. Repository access and capabilities are limited to what you select there. The token is encrypted at rest.</p>
-            <button>Connect GitHub</button>
+            <label>Provider<select name="provider" data-git-provider data-icon-select>@foreach (var provider in GitProviders.All) { <option value="@provider">@provider</option> }</select></label>
+            <label>Server URL (optional)<input name="baseUrl" type="url" placeholder="Provider default" /></label>
+            <label>Git/API username<input name="username" placeholder="Needed by some providers" /></label>
+            <label>Workspace / organization<input name="namespaceName" placeholder="Bitbucket or Azure organization" /></label>
+            <label>Region (cloud providers)<input name="region" placeholder="us-east-1" /></label>
+            <label class="wide">Repository HTTPS URL (optional)<input name="repositoryUrl" type="url" placeholder="Connect one repository directly" /></label>
+            <label class="wide">Access token or Git password<input name="token" type="password" required autocomplete="off" spellcheck="false" /></label>
+            <div class="wide provider-links" data-git-provider-links></div>
+            <p class="wide form-help">The server discovers repositories through the provider API when supported. For AWS CodeCommit, Google Secure Source Manager, or any repository that cannot be discovered, supply its HTTPS clone URL. Credentials are encrypted at rest.</p>
+            <button>Connect provider</button>
         </form>
     </details>
     @if (GitHub.IsConfigured) { <details class="configuration-note"><summary>Advanced GitHub App connection</summary><a class="button secondary" asp-controller="GitHub" asp-action="Connect" asp-route-returnUrl="/#connections">Connect configured GitHub App</a></details> }
     @if (!Model.State.GitHubConnections.Any())
     {
-        <div class="empty">No GitHub accounts are connected yet.</div>
+        <div class="empty">No Git providers are connected yet.</div>
     }
     @foreach (var connection in Model.State.GitHubConnections)
     {
-        <details class="github-card">
-            <summary class="project-head"><div><h3>@connection.AccountLogin</h3><p>@connection.AuthenticationType authentication · @connection.AccountType · @connection.Repositories.Count repositories · refreshed @connection.RefreshedAt.ToLocalTime().ToString("g")</p></div><span class="pill">GitHub</span></summary>
-            <div class="actions">@if (!string.IsNullOrWhiteSpace(connection.SettingsUrl)) { <a class="button secondary" href="@connection.SettingsUrl">Manage on GitHub</a> }<form asp-controller="GitHub" asp-action="Refresh" method="post"><input type="hidden" name="id" value="@connection.Id"/><button class="secondary">Refresh</button></form><form asp-controller="GitHub" asp-action="Delete" method="post" onsubmit="return confirm('Remove this GitHub connection from the server?')"><input type="hidden" name="id" value="@connection.Id"/><button class="link-danger">Remove</button></form></div>
+        <details class="github-card" open="@(!Model.State.Projects.Any())">
+            <summary class="project-head"><div><h3>@connection.AccountLogin</h3><p>@connection.AuthenticationType authentication · @connection.AccountType · @connection.Repositories.Count repositories · refreshed @connection.RefreshedAt.ToLocalTime().ToString("g")</p></div><span class="pill">@connection.Provider</span></summary>
+            <div class="actions">@if (!string.IsNullOrWhiteSpace(connection.SettingsUrl)) { <a class="button secondary" href="@connection.SettingsUrl">Manage on @connection.Provider</a> }<form asp-controller="GitHub" asp-action="Refresh" method="post"><input type="hidden" name="id" value="@connection.Id"/><button class="secondary">Refresh</button></form><form asp-controller="GitHub" asp-action="Delete" method="post" onsubmit="return confirm('Remove this Git provider connection from the server?')"><input type="hidden" name="id" value="@connection.Id"/><button class="link-danger">Remove</button></form></div>
+            <section class="repository-catalog" aria-label="Repositories available from @connection.AccountLogin">
+                <div class="repository-catalog-head"><strong>Available repositories</strong><span class="pill">@connection.Repositories.Count</span></div>
+                @if (connection.Repositories.Any())
+                {
+                    <div class="repository-catalog-list">
+                    @foreach (var repository in connection.Repositories.OrderBy(x => x.FullName, StringComparer.OrdinalIgnoreCase))
+                    {
+                        <a href="@repository.HtmlUrl" target="_blank" rel="noopener"><span>@repository.FullName</span><small>@(repository.IsPrivate ? "private" : "public")</small></a>
+                    }
+                    </div>
+                }
+                else
+                {
+                    <p class="muted">No repositories were returned. Refresh the connection after granting repository access.</p>
+                }
+            </section>
+            @if (!Model.State.Projects.Any())
+            {
+                <div class="repository-project-empty">Create a project to select, import, and publish to these repositories.</div>
+            }
             @foreach (var project in Model.State.Projects)
             {
                 var selected = Model.State.ProjectRepositories.Where(x => x.ProjectId == project.Id && x.GitHubConnectionId == connection.Id).Select(x => x.RepositoryId).ToHashSet();

@@ -1,19 +1,26 @@
 @model GitHubService
-@{ ViewData["Title"] = "Connect GitHub"; }
+@{ ViewData["Title"] = "Connect Git provider"; }
 <div class="auth-wrap"><section class="auth-card wizard-card">
-    <p class="eyebrow">FIRST RUN · STEP 3 OF 4</p>
-    <h1>Connect GitHub.</h1>
-    <p>Paste a fine-grained personal access token to let this server work with the repositories you selected when creating the token.</p>
+    <p class="eyebrow">CONNECTIONS · GIT PROVIDER</p>
+    <h1>Connect a Git provider.</h1>
+    <p>Use any supported hosted or self-hosted provider. The same connection powers repository import, result publishing, manual publishing, and background sync.</p>
     @if (TempData["Message"] is string message) { <div class="notice" data-auto-dismiss-notice role="status"><span>@message</span><button type="button" class="notice-close" data-notice-close aria-label="Dismiss message">×</button><i class="notice-timer" aria-hidden="true"></i></div> }
     <form asp-action="ConnectToken" method="post" class="form-grid">
-        <input type="hidden" name="returnUrl" value="/Account/CreateProject" />
-        <label class="wide">Fine-grained access token<input name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="github_pat_…" /></label>
-        <p class="wide form-help"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token on GitHub ↗</a>. Select the repositories you want this server to manage and grant the needed repository permissions. It will be encrypted before it is saved.</p>
-        <button class="wizard-primary">Connect GitHub →</button>
+        <input type="hidden" name="returnUrl" value="/Account/Connections#git" />
+        <label>Provider<select name="provider" data-git-provider data-icon-select>@foreach (var provider in GitProviders.All) { <option value="@provider">@provider</option> }</select></label>
+        <label>Server URL (optional)<input name="baseUrl" type="url" placeholder="Provider default" /></label>
+        <label>Git/API username<input name="username" /></label>
+        <label>Workspace / organization<input name="namespaceName" /></label>
+        <label>Region<input name="region" placeholder="Cloud providers only" /></label>
+        <label class="wide">Repository HTTPS URL (optional)<input name="repositoryUrl" type="url" placeholder="Required for AWS/GCP; usable for every provider" /></label>
+        <label class="wide">Access token or Git password<input name="token" type="password" required autocomplete="off" spellcheck="false" /></label>
+        <div class="wide provider-links" data-git-provider-links></div>
+        <p class="wide form-help">GitHub, GitLab, Bitbucket, Codeberg, Gitea, SourceHut, Azure DevOps, and Gitee support API discovery. A direct HTTPS clone URL connects one repository and is the path for AWS CodeCommit and Google Secure Source Manager. Credentials are encrypted before storage.</p>
+        <button class="wizard-primary">Connect provider →</button>
     </form>
     @if (Model.IsConfigured)
     {
-        <details><summary>Advanced: connect through a configured GitHub App</summary><a class="button secondary" asp-action="Connect" asp-route-returnUrl="/Account/CreateProject">Authorize GitHub App</a></details>
+        <details><summary>Advanced: connect through a configured GitHub App</summary><a class="button secondary" asp-action="Connect" asp-route-returnUrl="/Account/Connections#git">Authorize GitHub App</a></details>
     }
-    <a class="wizard-skip" asp-controller="Account" asp-action="CreateProject">Skip for now</a>
+    <a class="wizard-skip" asp-controller="Account" asp-action="Connections" asp-fragment="storage">Back to connection setup</a>
 </section></div>

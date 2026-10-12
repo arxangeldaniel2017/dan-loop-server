@@ -300,18 +300,18 @@ public sealed class FilesController(StateStore store, WorkspaceService workspace
     {
         if (await GetProjectAsync(projectId, manage: true) is null) return Forbid();
         if (selectedPaths is null || selectedPaths.Count == 0)
-            return await FileBrowserResultAsync(projectId, path, "GitHub publish failed: select at least one file or folder.", true);
+            return await FileBrowserResultAsync(projectId, path, "Git publish failed: select at least one file or folder.", true);
         var allowed = await store.ReadAsync(state => state.AgentRuntime.Settings.AllowGitHubPublish);
-        if (!allowed) return await FileBrowserResultAsync(projectId, path, "GitHub publishing is disabled under AI workspace access.", true);
+        if (!allowed) return await FileBrowserResultAsync(projectId, path, "Git publishing is disabled under AI workspace access.", true);
         try
         {
             var files = await workspace.ExpandSelectionToFilesAsync(projectId, selectedPaths);
             if (files.Count == 0) throw new InvalidOperationException("The selection contains no publishable files.");
             var project = (await GetProjectAsync(projectId, manage: false))!;
             var url = await tools.PublishPathsAsync(projectId, files, $"Publish selected files from {project.Name}", cancellationToken);
-            return await FileBrowserResultAsync(projectId, path, $"Published {files.Count} selected file{(files.Count == 1 ? "" : "s")} to GitHub. {url}");
+            return await FileBrowserResultAsync(projectId, path, $"Published {files.Count} selected file{(files.Count == 1 ? "" : "s")} to the Git provider. {url}");
         }
-        catch (Exception ex) { return await FileBrowserResultAsync(projectId, path, $"GitHub publish failed: {ex.Message}", true); }
+        catch (Exception ex) { return await FileBrowserResultAsync(projectId, path, $"Git publish failed: {ex.Message}", true); }
     }
 
     [HttpPost, ValidateAntiForgeryToken]

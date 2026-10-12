@@ -5,7 +5,7 @@
 <div class="section-title"><div><p class="eyebrow">ADVANCED CONFIGURATION</p><h2>AI workspace access <span class="advanced-badge">Advanced</span></h2><p class="muted">The agent is restricted to this project's files. It cannot open a terminal or run anything on the server.</p></div><form asp-controller="AgentRuntime" asp-action="RestoreDefaults" method="post"><button class="secondary">Restore secure defaults</button></form></div>
 <div class="runtime-defaults">
     <strong>Fixed safety boundary <span class="advanced-badge">Not configurable</span></strong>
-    <span>Project files only</span><span>Relative paths only</span><span>Structured file tools</span><span>GitHub API only when connected</span>
+    <span>Project files only</span><span>Relative paths only</span><span>Structured file tools</span><span>Git provider only when connected</span>
     <span class="blocked">No Bash, terminal, commands, builds, tests, local Git, server browsing, or outside paths</span>
     <p>There is no server-command allowlist. This boundary always stays active; the settings below only add or remove safe project tools.</p>
 </div>
@@ -17,14 +17,14 @@
             <label class="check"><input type="checkbox" name="allowFileRead" value="true" checked="@settings.AllowFileRead" data-runtime-capability/> Read project files</label>
             <label class="check"><input type="checkbox" name="allowFileWrite" value="true" checked="@settings.AllowFileWrite" data-runtime-capability/> Edit project files</label>
             <label class="check"><input type="checkbox" name="useStreaming" value="true" checked="@settings.UseStreaming"/> Stream model responses</label>
-            <label class="check runtime-toggle-wide"><input type="checkbox" name="allowGitHubPublish" value="true" checked="@settings.AllowGitHubPublish" data-runtime-capability/> Allow background GitHub sync and manual selected publishing</label>
+            <label class="check runtime-toggle-wide"><input type="checkbox" name="allowGitHubPublish" value="true" checked="@settings.AllowGitHubPublish" data-runtime-capability/> Allow background Git sync and manual selected publishing</label>
         </div></section>
         <section class="runtime-form-section"><h3>Execution limits</h3><div class="runtime-limit-grid">
             <label>Maximum agent steps<input type="number" name="maxSteps" min="1" max="50" value="@settings.MaxSteps"/><small class="field-help">Maximum tool-and-model cycles for one job.</small></label>
             <label>Maximum output tokens<input type="number" name="maxOutputTokens" min="32" max="32768" value="@settings.MaxOutputTokens"/><small class="field-help">Maximum model response size per step. Default: 16,384.</small></label>
             <label>Tool output limit<input type="number" name="maxToolOutputCharacters" min="1000" max="100000" value="@settings.MaxToolOutputCharacters"/><small class="field-help">Maximum characters returned by one file tool.</small></label>
         </div></section>
-        <p class="runtime-policy-note">GitHub publishing works only for a repository assigned under the GitHub tab and while that connection has write permission. AI-created changes are grouped into background commits; user uploads and user edits are excluded unless selected in the file manager. Every project is stored under its own repository folder. It never enables terminal or local Git access.</p>
+        <p class="runtime-policy-note">Git publishing works only for a repository assigned under the connections tab and while that provider credential has write permission. AI-created changes are grouped into background commits; user uploads and user edits are excluded unless selected in the file manager. Every project is stored under its own repository folder. It never enables terminal access.</p>
         <div class="runtime-form-actions"><button>Save advanced configuration</button></div>
     </form>
 </details>
@@ -34,13 +34,13 @@
         <div><p class="eyebrow">CURRENT PERMISSIONS</p><h3>Allowed tools <span class="allowed-tool-count" data-allowed-tool-count></span></h3><p class="muted">These are structured project tools—not server commands. Selecting or clearing a capability previews the exact list immediately; save to apply it to jobs.</p></div>
     </div>
     <div class="tool-policy-grid">
-        <article data-tool-policy data-requires="enabled"><code>workspace_guide</code><strong>Workspace guide</strong><p>Explains the logical project root, top-level project entries, currently available tools, and assigned GitHub destination.</p></article>
+        <article data-tool-policy data-requires="enabled"><code>workspace_guide</code><strong>Workspace guide</strong><p>Explains the logical project root, top-level project entries, currently available tools, and assigned Git destination.</p></article>
         <article data-tool-policy data-requires="enabled,allowFileRead"><code>browse_folder</code><strong>Browse project folder</strong><p>Shows one folder through a safe project API. It cannot browse the server or use a file-list command.</p></article>
         <article data-tool-policy data-requires="enabled,allowFileRead"><code>read_file</code><strong>Read any project file</strong><p>Returns text directly and binary files as bounded Base64 chunks. Absolute paths and protected internal folders are rejected.</p></article>
         <article data-tool-policy data-requires="enabled,allowFileWrite"><code>write_file</code><strong>Write project file</strong><p>Creates or replaces one project text file and backs up existing content first.</p></article>
         <article data-tool-policy data-requires="enabled,allowFileWrite"><code>replace_in_file</code><strong>Replace text in project file</strong><p>Changes one exact, unambiguous text occurrence without executing a script or command.</p></article>
         <article data-tool-policy data-requires="enabled,allowFileWrite"><code>generate_asset</code><strong>Generate a project asset</strong><p>Uses enabled image, audio, video, or file-generation connections with priority fallback, then saves the result inside the project.</p></article>
-        <article data-tool-policy data-requires="enabled,allowGitHubPublish"><code>publish_project_files</code><strong>Publish through GitHub</strong><p>Commits selected files through the connected GitHub API. It uses no shell, Git executable, or local repository.</p></article>
+        <article data-tool-policy data-requires="enabled,allowGitHubPublish"><code>publish_project_files</code><strong>Publish through Git provider</strong><p>Commits selected files through the connected provider. It gives the agent no shell or Git executable access.</p></article>
     </div>
     <div class="allowed-tools-empty" data-allowed-tools-empty hidden><strong>AI file tools are disabled</strong><p>Jobs can still ask the model for text, but no project workspace tools will be sent to it.</p></div>
 </section>

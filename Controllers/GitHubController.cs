@@ -12,6 +12,7 @@ namespace DanLoopServer.Controllers;
 public sealed class GitHubController(
     StateStore store,
     GitHubService gitHub,
+    GitProviderService gitProviders,
     WorkspaceService workspace,
     IDataProtectionProvider protectionProvider,
     ILogger<GitHubController> logger) : Controller
@@ -23,23 +24,24 @@ public sealed class GitHubController(
     public IActionResult Setup() => View(gitHub);
 
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> ConnectToken(string token, string? returnUrl, CancellationToken cancellationToken)
+    public async Task<IActionResult> ConnectToken(string token, string? provider, string? baseUrl, string? username,
+        string? namespaceName, string? region, string? repositoryUrl, string? returnUrl, CancellationToken cancellationToken)
     {
         var destination = Url.IsLocalUrl(returnUrl) ? returnUrl! : "/#connections";
         try
         {
-            var connection = await gitHub.LoadTokenConnectionAsync(token, cancellationToken);
+            var connection = await gitProviders.ConnectAsync(provider ?? GitProviders.GitHub, token, baseUrl, username, namespaceName, region, repositoryUrl, cancellationToken);
             await store.UpdateAsync(state =>
             {
                 state.GitHubConnections.Add(connection);
                 return true;
             });
-            return Back($"Connected GitHub account {connection.AccountLogin} with {connection.Repositories.Count} accessible repositories.", destination);
+            return Back($"Connected {connection.Provider} account {connection.AccountLogin} with {connection.Repositories.Count} accessible repositories.", destination);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Could not connect GitHub access token");
-            return Back("GitHub rejected the token or its permissions. Check the token and try again.", destination);
+            logger.LogWarning(ex, "Could not connect {Provider}", provider);
+            return Back($"Could not connect {provider ?? GitProviders.GitHub}: {ex.Message}", destination);
         }
     }
 
@@ -138,11 +140,16 @@ public sealed class GitHubController(
         if (current is null) return NotFound();
         try
         {
-            var refreshed = await gitHub.RefreshConnectionAsync(current, cancellationToken);
+            var refreshed = await gitProviders.RefreshAsync(current, cancellationToken);
             await store.UpdateAsync(state =>
             {
                 var connection = state.GitHubConnections.First(x => x.Id == id);
                 connection.AuthenticationType = refreshed.AuthenticationType;
+                connection.Provider = refreshed.Provider;
+                connection.BaseUrl = refreshed.BaseUrl;
+                connection.Namespace = refreshed.Namespace;
+                connection.Region = refreshed.Region;
+                connection.Username = refreshed.Username;
                 connection.ProtectedToken = refreshed.ProtectedToken;
                 connection.InstallationId = refreshed.InstallationId;
                 connection.AccountLogin = refreshed.AccountLogin;
@@ -153,12 +160,12 @@ public sealed class GitHubController(
                 RemoveUnavailableMappings(state, connection);
                 return true;
             });
-            return Back("GitHub repositories refreshed.", "/#connections");
+            return Back($"{current.Provider} repositories refreshed.", "/#connections");
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Could not refresh GitHub connection {ConnectionId}", id);
-            return Back("Could not refresh the GitHub connection.", "/#connections");
+            return Back($"Could not refresh the {current.Provider} connection: {ex.Message}", "/#connections");
         }
     }
 
@@ -202,14 +209,14 @@ public sealed class GitHubController(
         if (target is null) return NotFound();
         try
         {
-            var archive = await gitHub.DownloadRepositoryArchiveAsync(target.Connection, target.Repository, cancellationToken);
+            var archive = await gitProviders.DownloadRepositoryArchiveAsync(target.Connection, target.Repository, cancellationToken);
             var folder = await workspace.ImportRepositoryAsync(projectId, target.Repository.FullName, archive);
             return Back($"Imported {target.Repository.FullName} into {folder}.", $"/Files?projectId={projectId}");
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Could not import GitHub repository {RepositoryId}", repositoryId);
-            return Back("Could not import the GitHub repository: " + ex.Message, "/#connections");
+            logger.LogWarning(ex, "Could not import Git repository {RepositoryId}", repositoryId);
+            return Back("Could not import the Git repository: " + ex.Message, "/#connections");
         }
     }
 
@@ -224,7 +231,7 @@ public sealed class GitHubController(
             foreach (var project in state.Projects.Where(x => x.ResultsRepositoryId is not null && removedRepositoryIds.Contains(x.ResultsRepositoryId.Value))) project.ResultsRepositoryId = null;
             return true;
         });
-        return Back("GitHub connection and its stored credential were removed from this server.", "/#connections");
+        return Back("Git provider connection and its stored credential were removed from this server.", "/#connections");
     }
 
     private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);

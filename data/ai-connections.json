@@ -24,7 +24,7 @@
     ]
   },
   {
-    "id": "runpod", "name": "Runpod", "baseUrl": "", "requiresBaseUrl": true,
+    "id": "runpod", "name": "Runpod", "baseUrl": "", "requiresBaseUrl": true, "apiKeyRequired": false,
     "apiKeyUrl": "https://www.runpod.io/console/user/settings", "documentationUrl": "https://docs.runpod.io/serverless/vllm/openai-compatibility", "pricingUrl": "https://www.runpod.io/pricing",
     "models": [
       { "id": "custom", "name": "Deployed endpoint model", "capabilities": ["Planner", "Coder", "Orchestrator", "Tool calling", "Generator", "Files"] },

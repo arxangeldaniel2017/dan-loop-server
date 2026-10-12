@@ -54,6 +54,50 @@ const providerIconUrl = provider => {
   const candidate = provider?.apiKeyUrl || provider?.documentationUrl || provider?.pricingUrl || provider?.baseUrl;
   try { return `${new URL(candidate).origin}/favicon.ico`; } catch { return ''; }
 };
+const serviceProviderIcons = {
+  'Amazon S3': 'https://aws.amazon.com/favicon.ico',
+  'DigitalOcean Spaces': 'https://cdn.simpleicons.org/digitalocean',
+  'Cloudflare R2': 'https://cdn.simpleicons.org/cloudflare',
+  'Backblaze B2': 'https://cdn.simpleicons.org/backblaze',
+  'Wasabi': 'https://cdn.simpleicons.org/wasabi',
+  'Google Cloud Storage': 'https://cdn.simpleicons.org/googlecloud',
+  'Azure Blob Storage': 'https://azure.microsoft.com/favicon.ico',
+  'Oracle Object Storage': 'https://www.oracle.com/favicon.ico',
+  'IBM Cloud Object Storage': 'https://www.ibm.com/favicon.ico',
+  'Storj': 'https://www.storj.io/assets/brand/storj-logo-mark-color.svg',
+  'IDrive e2': 'https://www.idrive.com/favicon.ico',
+  'Vultr Object Storage': 'https://cdn.simpleicons.org/vultr',
+  'Linode Object Storage': 'https://cdn.simpleicons.org/akamai',
+  'Scaleway Object Storage': 'https://cdn.simpleicons.org/scaleway',
+  'OVHcloud Object Storage': 'https://cdn.simpleicons.org/ovh',
+  'Hetzner Object Storage': 'https://cdn.simpleicons.org/hetzner',
+  'Tigris Data': 'https://www.tigrisdata.com/favicon.ico',
+  'Bunny Storage': 'https://cdn.simpleicons.org/bunnydotnet',
+  'S3 compatible': 'https://aws.amazon.com/favicon.ico',
+  'GitHub': 'https://cdn.simpleicons.org/github',
+  'GitLab': 'https://cdn.simpleicons.org/gitlab',
+  'Bitbucket': 'https://cdn.simpleicons.org/bitbucket',
+  'Codeberg': 'https://cdn.simpleicons.org/codeberg',
+  'Gitea Cloud': 'https://cdn.simpleicons.org/gitea',
+  'SourceHut': 'https://cdn.simpleicons.org/sourcehut',
+  'AWS CodeCommit': 'https://aws.amazon.com/favicon.ico',
+  'Azure DevOps Repos': 'https://azure.microsoft.com/favicon.ico',
+  'Google Cloud Secure Source Manager': 'https://cdn.simpleicons.org/googlecloud',
+  'Gitee': 'https://cdn.simpleicons.org/gitee'
+};
+const serviceProviderIconUrl = name => serviceProviderIcons[name] || '';
+const gitProviderLinks = {
+  'GitHub': ['https://github.com/settings/personal-access-tokens/new', 'https://docs.github.com/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens'],
+  'GitLab': ['https://gitlab.com/-/user_settings/personal_access_tokens', 'https://docs.gitlab.com/user/profile/personal_access_tokens/'],
+  'Bitbucket': ['https://id.atlassian.com/manage-profile/security/api-tokens', 'https://support.atlassian.com/bitbucket-cloud/docs/create-an-api-token/'],
+  'Codeberg': ['https://codeberg.org/user/settings/applications', 'https://docs.codeberg.org/advanced/access-token/'],
+  'Gitea Cloud': ['https://gitea.com/user/settings/applications', 'https://docs.gitea.com/development/api-usage'],
+  'SourceHut': ['https://meta.sr.ht/oauth2/personal-token', 'https://man.sr.ht/meta.sr.ht/oauth.md'],
+  'AWS CodeCommit': ['https://console.aws.amazon.com/iam/home#/security_credentials', 'https://docs.aws.amazon.com/codecommit/latest/userguide/setting-up-gc.html'],
+  'Azure DevOps Repos': ['https://dev.azure.com/_usersSettings/tokens', 'https://learn.microsoft.com/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate'],
+  'Google Cloud Secure Source Manager': ['https://console.cloud.google.com/iam-admin/serviceaccounts', 'https://cloud.google.com/secure-source-manager/docs/authentication'],
+  'Gitee': ['https://gitee.com/profile/personal_access_tokens', 'https://gitee.com/api/v5/swagger']
+};
 const createIconSelect = (select, describeOption) => {
   if (!select || select.dataset.iconSelectReady) return null;
   select.dataset.iconSelectReady = 'true';
@@ -268,28 +312,83 @@ document.querySelectorAll('[data-storage-connection-form]').forEach(form => {
   const provider = form.querySelector('[data-storage-provider]');
   const endpoint = form.querySelector('[data-storage-endpoint]');
   const endpointInput = endpoint?.querySelector('input');
+  const regionInput = form.querySelector('input[name="region"]');
   const session = form.querySelector('[data-storage-session]');
   const pathStyle = form.querySelector('[data-storage-path-style]');
+  const pathStyleInput = pathStyle?.querySelector('input');
+  const secret = form.querySelector('[data-storage-secret]');
+  const secretInput = secret?.querySelector('input');
+  const accessLabel = form.querySelector('[data-storage-access-label]');
+  const secretLabel = form.querySelector('[data-storage-secret-label]');
+  const containerLabel = form.querySelector('[data-storage-container-label]');
   const links = form.querySelector('[data-storage-links]');
+  let initialized = false;
   const updateStorageProvider = () => {
     const value = provider?.value || 'Amazon S3';
+    const option = provider?.selectedOptions?.[0];
+    const kind = option?.dataset.kind || 's3';
     const isAws = value === 'Amazon S3';
-    const isSpaces = value === 'DigitalOcean Spaces';
+    const isBunny = kind === 'bunny';
+    const isAzure = kind === 'azure';
+    if (initialized) {
+      if (regionInput) regionInput.value = option?.dataset.defaultRegion || '';
+      if (endpointInput) endpointInput.value = '';
+      if (pathStyleInput) pathStyleInput.checked = option?.dataset.forcePath === 'true';
+    }
     if (endpoint) endpoint.hidden = isAws;
     if (endpointInput) {
-      endpointInput.required = value === 'S3 compatible';
-      endpointInput.placeholder = isSpaces ? 'Optional — inferred from region' : 'https://your-s3-endpoint.example';
+      endpointInput.required = option?.dataset.endpointRequired === 'true';
+      endpointInput.placeholder = endpointInput.required ? 'Required provider endpoint URL' : 'Optional — inferred when possible';
     }
-    if (session) session.hidden = !isAws;
+    if (session) session.hidden = option?.dataset.session !== 'true';
     if (pathStyle) pathStyle.hidden = value !== 'S3 compatible';
-    if (links) links.innerHTML = isSpaces
-      ? '<a href="https://cloud.digitalocean.com/account/api/spaces" target="_blank" rel="noopener">Create Spaces key ↗</a><a href="https://docs.digitalocean.com/products/spaces/how-to/manage-access/" target="_blank" rel="noopener">Documentation ↗</a><a href="https://www.digitalocean.com/pricing/spaces-object-storage" target="_blank" rel="noopener">Pricing ↗</a>'
-      : isAws
-        ? '<a href="https://console.aws.amazon.com/iam/home#/security_credentials" target="_blank" rel="noopener">AWS credentials ↗</a><a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/GetStartedWithS3.html" target="_blank" rel="noopener">Documentation ↗</a><a href="https://aws.amazon.com/s3/pricing/" target="_blank" rel="noopener">Pricing ↗</a>'
-        : '<a href="https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html" target="_blank" rel="noopener">S3 API documentation ↗</a>';
+    if (secret) secret.hidden = isBunny;
+    if (secretInput) secretInput.required = !isBunny && !form.querySelector('input[name="id"]');
+    if (accessLabel) accessLabel.textContent = isAzure ? (form.querySelector('input[name="id"]') ? 'New account name' : 'Storage account name') : isBunny ? (form.querySelector('input[name="id"]') ? 'New API password' : 'Storage-zone API password') : (form.querySelector('input[name="id"]') ? 'New access key' : 'Access key');
+    if (secretLabel) secretLabel.textContent = isAzure ? (form.querySelector('input[name="id"]') ? 'New account key' : 'Storage account key') : (form.querySelector('input[name="id"]') ? 'New secret key' : 'Secret key');
+    if (containerLabel) containerLabel.textContent = isAzure ? 'Container' : isBunny ? 'Storage zone' : 'Bucket';
+    if (links && option?.dataset.docs) links.innerHTML = `<a href="${option.dataset.docs}" target="_blank" rel="noopener">${value} documentation ↗</a>`;
+    initialized = true;
   };
   provider?.addEventListener('change', updateStorageProvider);
+  createIconSelect(provider, option => ({
+    label: option.textContent,
+    meta: option.dataset.kind === 'azure' ? 'Blob storage' : option.dataset.kind === 'bunny' ? 'Edge storage' : 'S3-compatible storage',
+    icon: serviceProviderIconUrl(option.value)
+  }));
   updateStorageProvider();
+});
+
+document.querySelectorAll('[data-git-provider]').forEach(select => {
+  const links = select.closest('form')?.querySelector('[data-git-provider-links]');
+  const updateGitProviderLinks = () => {
+    if (!links) return;
+    const [credentialUrl, documentationUrl] = gitProviderLinks[select.value] || [];
+    links.replaceChildren();
+    if (credentialUrl) {
+      const credentialLink = document.createElement('a');
+      credentialLink.href = credentialUrl;
+      credentialLink.target = '_blank';
+      credentialLink.rel = 'noopener';
+      credentialLink.textContent = 'Get access token / API key ↗';
+      links.append(credentialLink);
+    }
+    if (documentationUrl) {
+      const documentationLink = document.createElement('a');
+      documentationLink.href = documentationUrl;
+      documentationLink.target = '_blank';
+      documentationLink.rel = 'noopener';
+      documentationLink.textContent = 'Credential documentation ↗';
+      links.append(documentationLink);
+    }
+  };
+  select.addEventListener('change', updateGitProviderLinks);
+  createIconSelect(select, option => ({
+    label: option.textContent,
+    meta: 'Git provider',
+    icon: serviceProviderIconUrl(option.value)
+  }));
+  updateGitProviderLinks();
 });
 
 document.querySelectorAll('[data-model-capability]').forEach(checkbox => {

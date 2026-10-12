@@ -31,7 +31,7 @@ public sealed class GitHubSyncWorker(
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Background GitHub sync iteration failed");
+                logger.LogError(ex, "Background Git sync iteration failed");
                 await Task.Delay(TimeSpan.FromSeconds(20), stoppingToken);
             }
         }
@@ -113,14 +113,14 @@ public sealed class GitHubSyncWorker(
                     {
                         ProjectId = project.Id,
                         Level = MessageLevels.Info,
-                        Text = $"Background GitHub sync published {existing.Count} AI-created file{(existing.Count == 1 ? "" : "s")}. {url}"
+                        Text = $"Background Git sync published {existing.Count} AI-created file{(existing.Count == 1 ? "" : "s")}. {url}"
                     });
                     return true;
                 });
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Background GitHub sync failed for project {ProjectId}", project.Id);
+                logger.LogWarning(ex, "Background Git sync failed for project {ProjectId}", project.Id);
                 await store.UpdateAsync(state =>
                 {
                     var current = state.Projects.First(item => item.Id == project.Id);
@@ -128,7 +128,7 @@ public sealed class GitHubSyncWorker(
                     current.LastAutoPublishError = ex.Message;
                     current.NextAutoPublishAttemptAt = DateTimeOffset.UtcNow + RetryDelay;
                     if (shouldReport)
-                        state.Messages.Add(new AppMessage { ProjectId = project.Id, Level = MessageLevels.Warning, Text = $"Background GitHub sync will retry: {ex.Message}" });
+                        state.Messages.Add(new AppMessage { ProjectId = project.Id, Level = MessageLevels.Warning, Text = $"Background Git sync will retry: {ex.Message}" });
                     return true;
                 });
             }

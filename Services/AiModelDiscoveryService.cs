@@ -39,7 +39,7 @@ public sealed class AiModelDiscoveryService(HttpClient http, IDataProtectionProv
 
     public static bool DiscoveryRequiresCredential(string providerId) => providerId.ToLowerInvariant() switch
     {
-        "openrouter" or "huggingface" or "elevenlabs" or "ollama" or "lmstudio" => false,
+        "openrouter" or "runpod" or "huggingface" or "elevenlabs" or "ollama" or "lmstudio" => false,
         _ => DiscoveryModeFor(providerId) != AiModelDiscoveryModes.None
     };
 

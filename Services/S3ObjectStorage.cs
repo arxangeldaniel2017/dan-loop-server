@@ -3,8 +3,6 @@ using System.Text.Json;
 using Amazon;
 using Amazon.Runtime;
 using Amazon.S3;
-using Amazon.S3.Model;
-using Amazon.S3.Util;
 using DanLoopServer.Models;
 using Microsoft.AspNetCore.DataProtection;
 
@@ -12,7 +10,7 @@ namespace DanLoopServer.Services;
 
 /// <summary>
 /// Keeps the local project workspace as a compatibility cache while mirroring durable
-/// project files to any S3-compatible service, including DigitalOcean Spaces.
+/// project files to the active S3-compatible, Azure Blob, or Bunny Storage connection.
 /// </summary>
 public sealed class S3ObjectStorage : IAsyncDisposable
 {
@@ -21,23 +19,27 @@ public sealed class S3ObjectStorage : IAsyncDisposable
     private readonly ILogger<S3ObjectStorage> _logger;
     private readonly StateStore _store;
     private readonly IDataProtector _protector;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly string _root;
     private string? _bucket;
     private string _prefix = "dan-loop/projects";
-    private IAmazonS3? _client;
+    private IObjectStorageClient? _client;
+    private string _provider = "";
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Dictionary<string, StoredFile> _manifest = new(StringComparer.Ordinal);
     private bool _initialized;
 
-    public S3ObjectStorage(IConfiguration configuration, StateStore store, IDataProtectionProvider protectionProvider, ILogger<S3ObjectStorage> logger)
+    public S3ObjectStorage(IConfiguration configuration, StateStore store, IDataProtectionProvider protectionProvider, IHttpClientFactory httpClientFactory, ILogger<S3ObjectStorage> logger)
     {
         _logger = logger;
         _store = store;
         _protector = protectionProvider.CreateProtector("object-storage-credentials-v1");
+        _httpClientFactory = httpClientFactory;
         _root = Path.GetFullPath(configuration["Storage:ProjectsPath"] ?? "/data/projects");
     }
 
     public bool IsEnabled => _client is not null && _bucket is not null;
+    public string ActiveProvider => IsEnabled ? _provider : "Local storage";
 
     public string ProtectSecret(string value) => string.IsNullOrWhiteSpace(value) ? "" : _protector.Protect(value.Trim());
 
@@ -50,22 +52,24 @@ public sealed class S3ObjectStorage : IAsyncDisposable
         try
         {
             var connection = await _store.ReadAsync(state => state.ObjectStorageConnections.FirstOrDefault(item => item.IsEnabled));
-            _client?.Dispose();
+            if (_client is not null) await _client.DisposeAsync();
             _client = null;
             _bucket = null;
+            _provider = "";
             _prefix = "dan-loop/projects";
             _manifest = new(StringComparer.Ordinal);
             _initialized = false;
             if (connection is null)
             {
-                _logger.LogInformation("No active saved S3-compatible storage connection; local project storage is active");
+                _logger.LogInformation("No active saved object-storage connection; local project storage is active");
                 return;
             }
 
             _client = CreateClient(connection);
             _bucket = connection.Bucket.Trim();
+            _provider = connection.Provider;
             _prefix = (string.IsNullOrWhiteSpace(connection.Prefix) ? "dan-loop/projects" : connection.Prefix).Trim('/');
-            await EnsureBucketAsync(_client, _bucket, connection.Region, cancellationToken);
+            await _client.EnsureContainerAsync(cancellationToken);
             _manifest = await ReadManifestAsync(cancellationToken);
             if (_manifest.Count == 0)
                 _manifest = await DiscoverRemoteFilesAsync(cancellationToken);
@@ -79,14 +83,15 @@ public sealed class S3ObjectStorage : IAsyncDisposable
             }
             _initialized = true;
             await SyncUnsafeAsync(cancellationToken);
-            _logger.LogInformation("Saved S3-compatible project storage enabled for bucket {Bucket} with prefix {Prefix}", _bucket, _prefix);
+            _logger.LogInformation("Saved {Provider} project storage enabled for container {Bucket} with prefix {Prefix}", _provider, _bucket, _prefix);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Could not initialize the active saved S3-compatible storage connection; local storage remains available");
-            _client?.Dispose();
+            _logger.LogError(ex, "Could not initialize the active saved object-storage connection; local storage remains available");
+            if (_client is not null) await _client.DisposeAsync();
             _client = null;
             _bucket = null;
+            _provider = "";
             _initialized = false;
         }
         finally
@@ -97,36 +102,51 @@ public sealed class S3ObjectStorage : IAsyncDisposable
 
     public async Task<string> TestAsync(ObjectStorageConnection connection, CancellationToken cancellationToken)
     {
-        using var client = CreateClient(connection);
-        await EnsureBucketAsync(client, connection.Bucket.Trim(), connection.Region, cancellationToken);
-        var result = await client.ListObjectsV2Async(new ListObjectsV2Request { BucketName = connection.Bucket.Trim(), MaxKeys = 1 }, cancellationToken);
-        return $"Connected to bucket '{connection.Bucket.Trim()}'.";
+        await using var client = CreateClient(connection);
+        await client.EnsureContainerAsync(cancellationToken);
+        var containerLabel = ObjectStorageProviders.IsAzure(connection.Provider) ? "container" : ObjectStorageProviders.IsBunny(connection.Provider) ? "storage zone" : "bucket";
+        return $"Connected to {connection.Provider} {containerLabel} '{connection.Bucket.Trim()}'.";
     }
 
-    private IAmazonS3 CreateClient(ObjectStorageConnection connection)
+    private IObjectStorageClient CreateClient(ObjectStorageConnection connection)
     {
-        var endpoint = string.IsNullOrWhiteSpace(connection.Endpoint) ? null : connection.Endpoint.Trim();
-        var region = string.IsNullOrWhiteSpace(connection.Region) ? InferSpacesRegion(endpoint) ?? "us-east-1" : connection.Region.Trim();
+        if (!ObjectStorageProviders.All.Contains(connection.Provider))
+            throw new InvalidOperationException($"Unknown object-storage provider '{connection.Provider}'.");
+        var accessKey = Unprotect(connection.ProtectedAccessKey);
+        var secretKey = Unprotect(connection.ProtectedSecretKey);
+        var sessionToken = Unprotect(connection.ProtectedSessionToken);
+        var region = string.IsNullOrWhiteSpace(connection.Region) ? ObjectStorageProviders.DefaultRegion(connection.Provider) : connection.Region.Trim();
+        var resolvedEndpoint = ObjectStorageProviders.ResolveEndpoint(connection.Provider, connection.Endpoint, region, accessKey);
+        if (ObjectStorageProviders.EndpointIsRequired(connection.Provider) && string.IsNullOrWhiteSpace(resolvedEndpoint))
+            throw new InvalidOperationException($"An endpoint is required for {connection.Provider}.");
+
+        if (ObjectStorageProviders.IsAzure(connection.Provider))
+            return AzureBlobStorageClient.Create(NormalizeEndpoint(resolvedEndpoint), accessKey, secretKey, connection.Bucket.Trim());
+        if (ObjectStorageProviders.IsBunny(connection.Provider))
+            return new BunnyStorageClient(_httpClientFactory.CreateClient(nameof(BunnyStorageClient)), NormalizeEndpoint(resolvedEndpoint), connection.Bucket.Trim(), accessKey);
+
+        var endpoint = string.IsNullOrWhiteSpace(resolvedEndpoint) ? null : resolvedEndpoint;
         var config = new AmazonS3Config
         {
             AuthenticationRegion = region,
             RegionEndpoint = RegionEndpoint.GetBySystemName(region),
-            ForcePathStyle = connection.ForcePathStyle
+            ForcePathStyle = connection.ForcePathStyle || ObjectStorageProviders.DefaultForcePathStyle(connection.Provider)
         };
         if (endpoint is not null)
         {
             config.ServiceURL = NormalizeEndpoint(endpoint);
             config.RegionEndpoint = null;
+            // Many S3-compatible services do not implement the SDK's optional modern
+            // checksum extensions. SigV4 still protects these requests and responses.
+            config.RequestChecksumCalculation = RequestChecksumCalculation.WHEN_REQUIRED;
+            config.ResponseChecksumValidation = ResponseChecksumValidation.WHEN_REQUIRED;
         }
-        var accessKey = Unprotect(connection.ProtectedAccessKey);
-        var secretKey = Unprotect(connection.ProtectedSecretKey);
-        var sessionToken = Unprotect(connection.ProtectedSessionToken);
         if (string.IsNullOrWhiteSpace(accessKey) || string.IsNullOrWhiteSpace(secretKey))
             throw new InvalidOperationException("Access key and secret key are required.");
         AWSCredentials credentials = string.IsNullOrWhiteSpace(sessionToken)
             ? new BasicAWSCredentials(accessKey, secretKey)
             : new SessionAWSCredentials(accessKey, secretKey, sessionToken);
-        return new AmazonS3Client(credentials, config);
+        return new S3StorageClient(new AmazonS3Client(credentials, config), connection.Bucket.Trim());
     }
 
     private string Unprotect(string value)
@@ -134,13 +154,6 @@ public sealed class S3ObjectStorage : IAsyncDisposable
         if (string.IsNullOrWhiteSpace(value)) return "";
         try { return _protector.Unprotect(value); }
         catch { throw new InvalidOperationException("The saved object-storage credentials could not be decrypted."); }
-    }
-
-    private static async Task EnsureBucketAsync(IAmazonS3 client, string bucket, string region, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(bucket)) throw new InvalidOperationException("Bucket name is required.");
-        if (await AmazonS3Util.DoesS3BucketExistV2Async(client, bucket)) return;
-        await client.PutBucketAsync(new PutBucketRequest { BucketName = bucket, UseClientRegion = true }, cancellationToken);
     }
 
     public async Task SyncAsync(CancellationToken cancellationToken = default)
@@ -170,7 +183,7 @@ public sealed class S3ObjectStorage : IAsyncDisposable
 
         foreach (var relativePath in _manifest.Keys.Except(localFiles.Keys, StringComparer.Ordinal).ToList())
         {
-            await _client!.DeleteObjectAsync(new DeleteObjectRequest { BucketName = _bucket, Key = _manifest[relativePath].Key }, cancellationToken);
+            await _client!.DeleteAsync(_manifest[relativePath].Key, cancellationToken);
             _manifest.Remove(relativePath);
             changed = true;
         }
@@ -197,72 +210,48 @@ public sealed class S3ObjectStorage : IAsyncDisposable
     {
         try
         {
-            using var response = await _client!.GetObjectAsync(_bucket, ObjectKey(ManifestName), cancellationToken);
-            return await JsonSerializer.DeserializeAsync<Dictionary<string, StoredFile>>(response.ResponseStream, cancellationToken: cancellationToken)
-                   ?? new(StringComparer.Ordinal);
+            var json = await _client!.DownloadTextAsync(ObjectKey(ManifestName), cancellationToken);
+            return string.IsNullOrWhiteSpace(json)
+                ? new(StringComparer.Ordinal)
+                : JsonSerializer.Deserialize<Dictionary<string, StoredFile>>(json) ?? new(StringComparer.Ordinal);
         }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound || ex.ErrorCode is "NoSuchKey" or "NotFound")
-        {
-            return new(StringComparer.Ordinal);
-        }
+        catch (JsonException ex) { throw new InvalidDataException("The remote object-storage manifest is invalid.", ex); }
     }
 
     private async Task<Dictionary<string, StoredFile>> DiscoverRemoteFilesAsync(CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, StoredFile>(StringComparer.Ordinal);
-        string? token = null;
-        do
+        var objects = await _client!.ListAsync(PrefixWithSlash(), cancellationToken);
+        foreach (var item in objects)
         {
-            var page = await _client!.ListObjectsV2Async(new ListObjectsV2Request
-            {
-                BucketName = _bucket,
-                Prefix = PrefixWithSlash(),
-                ContinuationToken = token
-            }, cancellationToken);
-            foreach (var item in page.S3Objects)
-            {
-                var relative = item.Key[PrefixWithSlash().Length..];
-                if (string.IsNullOrWhiteSpace(relative) || relative == ManifestName || !IsSafeRelative(relative)) continue;
-                result[relative] = new StoredFile(item.Key, item.Size ?? 0, "");
-            }
-            token = page.IsTruncated == true ? page.NextContinuationToken : null;
-        } while (token is not null);
+            var relative = item.Key[PrefixWithSlash().Length..];
+            if (string.IsNullOrWhiteSpace(relative) || relative == ManifestName || !IsSafeRelative(relative)) continue;
+            result[relative] = new StoredFile(item.Key, item.Size, "");
+        }
         return result;
     }
 
     private async Task UploadAsync(string key, string filePath, CancellationToken cancellationToken)
     {
-        await _client!.PutObjectAsync(new PutObjectRequest
-        {
-            BucketName = _bucket,
-            Key = key,
-            FilePath = filePath,
-            AutoCloseStream = true
-        }, cancellationToken);
+        await _client!.UploadAsync(key, filePath, cancellationToken);
     }
 
     private async Task DownloadAsync(string key, string destination, CancellationToken cancellationToken)
     {
-        using var response = await _client!.GetObjectAsync(_bucket, key, cancellationToken);
-        await response.WriteResponseStreamToFileAsync(destination, false, cancellationToken);
+        await _client!.DownloadAsync(key, destination, cancellationToken);
     }
 
     private async Task WriteManifestAsync(CancellationToken cancellationToken)
     {
-        await _client!.PutObjectAsync(new PutObjectRequest
-        {
-            BucketName = _bucket,
-            Key = ObjectKey(ManifestName),
-            ContentBody = JsonSerializer.Serialize(_manifest)
-        }, cancellationToken);
+        await _client!.UploadTextAsync(ObjectKey(ManifestName), JsonSerializer.Serialize(_manifest), cancellationToken);
     }
 
     private string LocalPath(string relativePath)
     {
-        if (!IsSafeRelative(relativePath)) throw new InvalidDataException("Unsafe object path in S3 storage.");
+        if (!IsSafeRelative(relativePath)) throw new InvalidDataException("Unsafe object path in remote storage.");
         var full = Path.GetFullPath(Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
         if (!full.StartsWith(_root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            throw new InvalidDataException("S3 object path escaped the projects directory.");
+            throw new InvalidDataException("Remote object path escaped the projects directory.");
         return full;
     }
 
@@ -287,13 +276,6 @@ public sealed class S3ObjectStorage : IAsyncDisposable
     }
 
     private static string NormalizeEndpoint(string endpoint) => endpoint.Contains("://", StringComparison.Ordinal) ? endpoint.TrimEnd('/') : "https://" + endpoint.TrimEnd('/');
-    private static string? InferSpacesRegion(string? endpoint)
-    {
-        if (endpoint is null || !endpoint.Contains("digitaloceanspaces.com", StringComparison.OrdinalIgnoreCase)) return null;
-        var host = Uri.TryCreate(NormalizeEndpoint(endpoint), UriKind.Absolute, out var uri) ? uri.Host : endpoint;
-        return host.Split('.')[0];
-    }
-
     private static string SafeObjectSegment(string value)
     {
         var ascii = new string(value.Normalize(System.Text.NormalizationForm.FormD)
@@ -308,9 +290,8 @@ public sealed class S3ObjectStorage : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_client is not null) _client.Dispose();
+        if (_client is not null) await _client.DisposeAsync();
         _gate.Dispose();
-        await ValueTask.CompletedTask;
     }
 
     private sealed record StoredFile(string Key, long Size, string Sha256);

@@ -68,7 +68,7 @@ public sealed class ExportController(StateStore store, WorkspaceService workspac
             view.State.Loops.Count(loop => loop.ProjectId == project.Id), view.State.Jobs.Count(job => job.ProjectId == project.Id),
             project.AutoPublishPendingPaths.Count, Iso(project.LastAutoPublishAt), project.LastAutoPublishCommitUrl, project.LastAutoPublishError
         });
-        return Csv("projects", ["Project ID", "Name", "Description", "Created UTC", "Workspace", "Repository folder", "Loops", "Jobs", "Pending GitHub files", "Last GitHub sync UTC", "Last GitHub commit", "Last GitHub error"], rows);
+        return Csv("projects", ["Project ID", "Name", "Description", "Created UTC", "Workspace", "Repository folder", "Loops", "Jobs", "Pending Git files", "Last Git sync UTC", "Last Git commit", "Last Git error"], rows);
     }
 
     [HttpGet]
@@ -119,7 +119,7 @@ public sealed class ExportController(StateStore store, WorkspaceService workspac
                 rows.Add([project.Name, path, info.Length, Iso(info.LastWriteTimeUtc), Path.GetExtension(path).TrimStart('.').ToLowerInvariant(), project.UserManagedPaths.Contains(path, StringComparer.OrdinalIgnoreCase), project.AutoPublishPendingPaths.Contains(path, StringComparer.OrdinalIgnoreCase)]);
             }
         }
-        return Csv("files", ["Project", "Path", "Size bytes", "Modified UTC", "Type", "User managed", "Pending GitHub sync"], rows);
+        return Csv("files", ["Project", "Path", "Size bytes", "Modified UTC", "Type", "User managed", "Pending Git sync"], rows);
     }
 
     [HttpGet, Authorize(Roles = Roles.Admin)]
@@ -148,11 +148,11 @@ public sealed class ExportController(StateStore store, WorkspaceService workspac
         var state = await store.ReadAsync(value => value);
         var rows = state.GitHubConnections.SelectMany(connection => connection.Repositories.Select(repository => new object?[]
         {
-            connection.AccountLogin, connection.AuthenticationType, Iso(connection.ConnectedAt), Iso(connection.RefreshedAt), repository.Id,
+            connection.Provider, connection.AccountLogin, connection.AuthenticationType, Iso(connection.ConnectedAt), Iso(connection.RefreshedAt), repository.Id,
             repository.FullName, repository.DefaultBranch, repository.IsPrivate, repository.HtmlUrl,
             string.Join("; ", state.ProjectRepositories.Where(link => link.GitHubConnectionId == connection.Id && link.RepositoryId == repository.Id).Select(link => state.Projects.FirstOrDefault(project => project.Id == link.ProjectId)?.Name))
         }));
-        return Csv("github", ["Account", "Authentication", "Connected UTC", "Refreshed UTC", "Repository ID", "Repository", "Default branch", "Private", "URL", "Projects"], rows);
+        return Csv("git-providers", ["Provider", "Account", "Authentication", "Connected UTC", "Refreshed UTC", "Repository ID", "Repository", "Default branch", "Private", "URL", "Projects"], rows);
     }
 
     [HttpGet, Authorize(Roles = Roles.Admin)]

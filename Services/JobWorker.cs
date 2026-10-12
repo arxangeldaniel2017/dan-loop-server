@@ -2,7 +2,7 @@ using DanLoopServer.Models;
 
 namespace DanLoopServer.Services;
 
-public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentRuntimeService runtime, WorkspaceService workspace, GitHubService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations, ILogger<JobWorker> logger) : BackgroundService
+public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentRuntimeService runtime, WorkspaceService workspace, GitProviderService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations, ILogger<JobWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -170,8 +170,8 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
                     var success = planned
                         ? "Project plan created. The next loop run will implement its first unchecked task."
                         : $"Implementation step completed with {current.ProjectFilesChanged.Count(path => !path.Equals("PLAN.md", StringComparison.OrdinalIgnoreCase))} project file change(s), and PLAN.md was updated.";
-                    if (backgroundPublishPaths.Count > 0) success += $" {backgroundPublishPaths.Count} generated file{(backgroundPublishPaths.Count == 1 ? " is" : "s are")} queued for background GitHub synchronization.";
-                    state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = string.IsNullOrWhiteSpace(pushError) ? MessageLevels.Info : MessageLevels.Warning, Text = string.IsNullOrWhiteSpace(pushError) ? success : $"{success} The run-report GitHub push failed: {pushError}" });
+                    if (backgroundPublishPaths.Count > 0) success += $" {backgroundPublishPaths.Count} generated file{(backgroundPublishPaths.Count == 1 ? " is" : "s are")} queued for background Git synchronization.";
+                    state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, JobId = current.Id, Level = string.IsNullOrWhiteSpace(pushError) ? MessageLevels.Info : MessageLevels.Warning, Text = string.IsNullOrWhiteSpace(pushError) ? success : $"{success} The run-report Git push failed: {pushError}" });
                 }
                 current.CompletedAt = DateTimeOffset.UtcNow;
                 return true;

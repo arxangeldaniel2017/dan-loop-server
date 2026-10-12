@@ -197,6 +197,23 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                     }
                     _state.Version = 14;
                 }
+                if (_state.Version < 15)
+                {
+                    foreach (var gitConnection in _state.GitHubConnections)
+                    {
+                        gitConnection.Provider = GitProviders.GitHub;
+                        gitConnection.BaseUrl = GitProviders.DefaultBaseUrl(GitProviders.GitHub);
+                        gitConnection.Namespace ??= "";
+                        gitConnection.Region ??= "";
+                        gitConnection.Username ??= "";
+                        foreach (var repository in gitConnection.Repositories)
+                        {
+                            repository.ExternalId ??= "";
+                            repository.ApiUrl ??= "";
+                        }
+                    }
+                    _state.Version = 15;
+                }
                 await SaveUnsafeAsync();
                 return;
             }

@@ -1,0 +1,116 @@
+@using DanLoopServer.Models
+@inject GitHubService GitHub
+@{
+    ViewData["Title"] = "Add connections";
+    var catalog = ViewBag.Catalog as List<AiProviderCatalogItem> ?? [];
+    var models = ViewBag.Models as List<RemoteModel> ?? [];
+    var gitConnections = ViewBag.GitHubConnections as List<GitHubConnection> ?? [];
+    var storageConnections = ViewBag.ObjectStorageConnections as List<ObjectStorageConnection> ?? [];
+}
+<div class="wizard-hub">
+    <header class="wizard-hub-head">
+        <div>
+            <p class="eyebrow">FIRST RUN · STEP 3 OF 3</p>
+            <h1>Add connections.</h1>
+            <p>Start with the primary AI connection, then optionally add Git and object storage. Add as many as you need now, or return to Connections later.</p>
+        </div>
+        <a class="button secondary" asp-controller="Home" asp-action="Index">Skip all connections</a>
+    </header>
+
+    @if (TempData["Message"] is string message)
+    {
+        <div class="notice" data-auto-dismiss-notice role="status"><span>@message</span><button type="button" class="notice-close" data-notice-close aria-label="Dismiss message">×</button><i class="notice-timer" aria-hidden="true"></i></div>
+    }
+    <div asp-validation-summary="All" class="error"></div>
+
+    <nav class="wizard-progress" aria-label="Connection setup sections">
+        <a href="#ai"><span>1</span>AI <small>recommended</small></a>
+        <a href="#git"><span>2</span>Git <small>optional</small></a>
+        <a href="#storage"><span>3</span>Storage <small>optional</small></a>
+    </nav>
+
+    <section class="wizard-connection-section" id="ai">
+        <div class="wizard-section-head">
+            <div><span class="wizard-step-index">1</span><div><p class="eyebrow">DEFAULT CONNECTION</p><h2>AI provider</h2><p>The first AI connection becomes the project default. Additional connections provide fallback routing and specialized capabilities.</p></div></div>
+            <span class="pill">@models.Count added</span>
+        </div>
+        @if (models.Any())
+        {
+            <div class="wizard-connections">@foreach (var connection in models) { <span class="pill">@connection.Name · @connection.ModelId</span> }</div>
+        }
+        <form asp-action="ConfigureModel" method="post" class="form-grid" data-ai-connection-form>
+            <input type="hidden" name="returnUrl" value="/Account/Connections#ai" />
+            <input type="hidden" name="addAnother" value="true" />
+            <label>Connection type<select name="providerId" data-ai-provider data-icon-select>@foreach (var provider in catalog) { <option value="@provider.Id" data-base-url="@provider.BaseUrl" data-docs="@provider.DocumentationUrl" data-key-url="@provider.ApiKeyUrl" data-pricing="@provider.PricingUrl">@provider.Name</option> }</select></label>
+            <label>Display name<input name="name" value="@(Context.Request.HasFormContentType ? Context.Request.Form["name"] : models.Any() ? $"AI connection {models.Count + 1}" : "Primary AI")" required /></label>
+            <label>Model<select data-ai-model-select data-icon-select required><option value="">Select a model</option></select><span class="model-discovery-actions"><button type="button" class="secondary compact-button" data-ai-load-models>Load live models</button><small data-ai-discovery-status aria-live="polite"></small></span></label>
+            <label data-ai-custom-model hidden>Other model ID<input data-ai-custom-model-input autocomplete="off" spellcheck="false" /></label>
+            <input type="hidden" name="modelId" data-ai-model-value />
+            <label>Model URL<input name="baseUrl" value="@(Context.Request.HasFormContentType ? Context.Request.Form["baseUrl"] : catalog.FirstOrDefault()?.BaseUrl)" type="url" required /></label>
+            <label data-ai-authentication>Authentication<select name="authenticationType" data-ai-authentication-select>@foreach (var type in AiAuthenticationTypes.All) { <option value="@type">@type</option> }</select></label>
+            <label data-ai-key-header hidden>Header name<input name="apiKeyHeaderName" value="api-key" /></label>
+            <label data-ai-api-key>API credential<input name="apiKey" type="password" autocomplete="off" /></label>
+            <fieldset class="capability-picker wide"><legend>Active capabilities</legend>@foreach (var capability in AiCapabilities.All) { <label class="check" data-ai-capability="@capability"><input type="checkbox" name="capabilities" value="@capability" /> @capability</label> }</fieldset>
+            <div class="wide provider-links" data-provider-links></div>
+            <div class="wide wizard-section-actions"><button>Add AI connection</button><a class="button secondary" href="#git">Skip AI / continue to Git →</a></div>
+        </form>
+    </section>
+
+    <section class="wizard-connection-section" id="git">
+        <div class="wizard-section-head">
+            <div><span class="wizard-step-index">2</span><div><p class="eyebrow">OPTIONAL</p><h2>Git provider</h2><p>Connect hosted or self-hosted repositories for imports, result publishing, and background sync.</p></div></div>
+            <span class="pill">@gitConnections.Count added</span>
+        </div>
+        @if (gitConnections.Any())
+        {
+            <div class="wizard-connections">@foreach (var connection in gitConnections) { <span class="pill">@connection.Provider · @connection.AccountLogin</span> }</div>
+        }
+        <form asp-controller="GitHub" asp-action="ConnectToken" method="post" class="form-grid">
+            <input type="hidden" name="returnUrl" value="/Account/Connections#git" />
+            <label>Provider<select name="provider" data-git-provider data-icon-select>@foreach (var provider in GitProviders.All) { <option value="@provider">@provider</option> }</select></label>
+            <label>Server URL (optional)<input name="baseUrl" type="url" placeholder="Provider default" /></label>
+            <label>Git/API username<input name="username" placeholder="Needed by some providers" /></label>
+            <label>Workspace / organization<input name="namespaceName" placeholder="Bitbucket or Azure organization" /></label>
+            <label>Region<input name="region" placeholder="Cloud providers only" /></label>
+            <label class="wide">Repository HTTPS URL (optional)<input name="repositoryUrl" type="url" placeholder="Required for AWS/GCP; usable for every provider" /></label>
+            <label class="wide">Access token or Git password<input name="token" type="password" required autocomplete="off" spellcheck="false" /></label>
+            <div class="wide provider-links" data-git-provider-links></div>
+            <p class="wide form-help">Credentials are encrypted before storage. Add another provider by submitting this form again.</p>
+            <div class="wide wizard-section-actions"><button>Connect Git provider</button><a class="button secondary" href="#storage">Skip Git / continue to storage →</a></div>
+        </form>
+        @if (GitHub.IsConfigured)
+        {
+            <div class="configuration-note"><strong>GitHub App available.</strong> <a asp-controller="GitHub" asp-action="Connect" asp-route-returnUrl="/Account/Connections#git">Authorize the configured GitHub App</a></div>
+        }
+    </section>
+
+    <section class="wizard-connection-section" id="storage">
+        <div class="wizard-section-head">
+            <div><span class="wizard-step-index">3</span><div><p class="eyebrow">OPTIONAL</p><h2>Object storage</h2><p>Mirror project files to an S3-compatible, Azure Blob, or Bunny storage provider. Only one connection is active at a time.</p></div></div>
+            <span class="pill">@storageConnections.Count added</span>
+        </div>
+        @if (storageConnections.Any())
+        {
+            <div class="wizard-connections">@foreach (var connection in storageConnections) { <span class="pill">@connection.Provider · @connection.Name</span> }</div>
+        }
+        <form asp-controller="Manage" asp-action="CreateStorageConnection" method="post" class="form-grid" data-storage-connection-form>
+            <input type="hidden" name="returnUrl" value="/Account/Connections#storage" />
+            <label>Provider<select name="provider" data-storage-provider data-icon-select>@foreach (var provider in ObjectStorageProviders.All) { <option value="@provider" data-default-region="@ObjectStorageProviders.DefaultRegion(provider)" data-endpoint-required="@ObjectStorageProviders.EndpointIsRequired(provider).ToString().ToLowerInvariant()" data-kind="@(ObjectStorageProviders.IsAzure(provider) ? "azure" : ObjectStorageProviders.IsBunny(provider) ? "bunny" : "s3")" data-session="@ObjectStorageProviders.SupportsSessionToken(provider).ToString().ToLowerInvariant()" data-force-path="@ObjectStorageProviders.DefaultForcePathStyle(provider).ToString().ToLowerInvariant()" data-docs="@ObjectStorageProviders.DocumentationUrl(provider)">@provider</option> }</select></label>
+            <label>Display name<input name="name" required value="@(storageConnections.Any() ? $"Storage {storageConnections.Count + 1}" : "Project storage")" /></label>
+            <label><span data-storage-container-label>Bucket</span><input name="bucket" required autocomplete="off" /></label>
+            <label data-storage-region>Region<input name="region" value="us-east-1" /></label>
+            <label class="wide" data-storage-endpoint hidden>Endpoint<input name="endpoint" type="url" placeholder="Provider endpoint URL" /></label>
+            <label class="wide">Folder prefix<input name="prefix" value="dan-loop/projects" /></label>
+            <label><span data-storage-access-label>Access key</span><input name="accessKey" type="password" required autocomplete="off" /></label>
+            <label data-storage-secret><span data-storage-secret-label>Secret key</span><input name="secretKey" type="password" required autocomplete="off" /></label>
+            <label data-storage-session>Session token<input name="sessionToken" type="password" autocomplete="off" placeholder="Optional" /></label>
+            <label class="check" data-storage-path-style hidden><input type="checkbox" name="forcePathStyle" value="true" /> Force path-style URLs</label>
+            <div class="wide provider-links" data-storage-links></div>
+            <label class="check"><input type="checkbox" name="isEnabled" value="true" checked /> Make this the active storage connection</label>
+            <div class="wide wizard-section-actions"><button>Add storage connection</button><a class="button secondary" asp-controller="Home" asp-action="Index">Skip storage / finish setup →</a></div>
+        </form>
+    </section>
+
+    <div class="wizard-finish"><div><strong>Ready to start?</strong><span>You can add, test, or change every connection later from the Connections tab.</span></div><a class="button" asp-controller="Home" asp-action="Index">Finish setup →</a></div>
+    <script type="application/json" id="ai-provider-catalog">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(catalog, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }))</script>
+</div>

@@ -2,7 +2,7 @@ namespace DanLoopServer.Models;
 
 public sealed class AppState
 {
-    public int Version { get; set; } = 14;
+    public int Version { get; set; } = 15;
     public List<AppUser> Users { get; set; } = [];
     public List<Project> Projects { get; set; } = [];
     public List<LoopDefinition> Loops { get; set; } = [];
@@ -301,6 +301,11 @@ public sealed class ProjectPermission
 public sealed class GitHubConnection
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public string Provider { get; set; } = GitProviders.GitHub;
+    public string BaseUrl { get; set; } = "https://github.com";
+    public string Namespace { get; set; } = "";
+    public string Region { get; set; } = "";
+    public string Username { get; set; } = "";
     public string AuthenticationType { get; set; } = GitHubAuthenticationTypes.App;
     public string ProtectedToken { get; set; } = "";
     public long InstallationId { get; set; }
@@ -310,6 +315,35 @@ public sealed class GitHubConnection
     public DateTimeOffset ConnectedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset RefreshedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<GitHubRepository> Repositories { get; set; } = [];
+}
+
+public static class GitProviders
+{
+    public const string GitHub = "GitHub";
+    public const string GitLab = "GitLab";
+    public const string Bitbucket = "Bitbucket";
+    public const string Codeberg = "Codeberg";
+    public const string Gitea = "Gitea Cloud";
+    public const string SourceHut = "SourceHut";
+    public const string AwsCodeCommit = "AWS CodeCommit";
+    public const string AzureDevOps = "Azure DevOps Repos";
+    public const string GoogleSecureSourceManager = "Google Cloud Secure Source Manager";
+    public const string Gitee = "Gitee";
+    public static readonly string[] All = [GitHub, GitLab, Bitbucket, Codeberg, Gitea, SourceHut, AwsCodeCommit, AzureDevOps, GoogleSecureSourceManager, Gitee];
+
+    public static string DefaultBaseUrl(string provider) => provider switch
+    {
+        GitLab => "https://gitlab.com",
+        Bitbucket => "https://bitbucket.org",
+        Codeberg => "https://codeberg.org",
+        Gitea => "https://gitea.com",
+        SourceHut => "https://git.sr.ht",
+        AwsCodeCommit => "https://codecommit.amazonaws.com",
+        AzureDevOps => "https://dev.azure.com",
+        GoogleSecureSourceManager => "https://securesourcemanager.googleapis.com",
+        Gitee => "https://gitee.com",
+        _ => "https://github.com"
+    };
 }
 
 public static class GitHubAuthenticationTypes
@@ -342,13 +376,109 @@ public static class ObjectStorageProviders
 {
     public const string AmazonS3 = "Amazon S3";
     public const string DigitalOceanSpaces = "DigitalOcean Spaces";
+    public const string CloudflareR2 = "Cloudflare R2";
+    public const string BackblazeB2 = "Backblaze B2";
+    public const string Wasabi = "Wasabi";
+    public const string GoogleCloudStorage = "Google Cloud Storage";
+    public const string AzureBlobStorage = "Azure Blob Storage";
+    public const string OracleObjectStorage = "Oracle Object Storage";
+    public const string IbmCloudObjectStorage = "IBM Cloud Object Storage";
+    public const string Storj = "Storj";
+    public const string IDriveE2 = "IDrive e2";
+    public const string VultrObjectStorage = "Vultr Object Storage";
+    public const string LinodeObjectStorage = "Linode Object Storage";
+    public const string ScalewayObjectStorage = "Scaleway Object Storage";
+    public const string OvhCloudObjectStorage = "OVHcloud Object Storage";
+    public const string HetznerObjectStorage = "Hetzner Object Storage";
+    public const string TigrisData = "Tigris Data";
+    public const string BunnyStorage = "Bunny Storage";
     public const string S3Compatible = "S3 compatible";
-    public static readonly string[] All = [AmazonS3, DigitalOceanSpaces, S3Compatible];
+    public static readonly string[] All =
+    [
+        AmazonS3, DigitalOceanSpaces, CloudflareR2, BackblazeB2, Wasabi,
+        GoogleCloudStorage, AzureBlobStorage, OracleObjectStorage, IbmCloudObjectStorage,
+        Storj, IDriveE2, VultrObjectStorage, LinodeObjectStorage, ScalewayObjectStorage,
+        OvhCloudObjectStorage, HetznerObjectStorage, TigrisData, BunnyStorage, S3Compatible
+    ];
+
+    public static bool IsAzure(string provider) => provider == AzureBlobStorage;
+    public static bool IsBunny(string provider) => provider == BunnyStorage;
+    public static bool UsesS3Api(string provider) => !IsAzure(provider) && !IsBunny(provider);
+    public static bool SupportsSessionToken(string provider) => provider is AmazonS3 or CloudflareR2 or S3Compatible;
+    public static bool EndpointIsRequired(string provider) => provider is CloudflareR2 or OracleObjectStorage or IDriveE2 or S3Compatible;
+    public static bool DefaultForcePathStyle(string provider) => provider is GoogleCloudStorage or S3Compatible;
+
+    public static string DefaultRegion(string provider) => provider switch
+    {
+        CloudflareR2 or GoogleCloudStorage or TigrisData => "auto",
+        DigitalOceanSpaces => "nyc3",
+        BackblazeB2 => "us-west-004",
+        OracleObjectStorage => "us-ashburn-1",
+        IbmCloudObjectStorage => "us-south",
+        VultrObjectStorage => "ewr1",
+        ScalewayObjectStorage => "fr-par",
+        OvhCloudObjectStorage => "gra",
+        HetznerObjectStorage => "fsn1",
+        BunnyStorage => "de",
+        AzureBlobStorage => "",
+        _ => "us-east-1"
+    };
+
+    public static string ResolveEndpoint(string provider, string? endpoint, string region, string? accountName = null)
+    {
+        if (!string.IsNullOrWhiteSpace(endpoint)) return endpoint.Trim().TrimEnd('/');
+        return provider switch
+        {
+            AmazonS3 => "",
+            DigitalOceanSpaces => $"https://{region}.digitaloceanspaces.com",
+            BackblazeB2 => $"https://s3.{region}.backblazeb2.com",
+            Wasabi => $"https://s3.{region}.wasabisys.com",
+            GoogleCloudStorage => "https://storage.googleapis.com",
+            AzureBlobStorage when !string.IsNullOrWhiteSpace(accountName) => $"https://{accountName.Trim()}.blob.core.windows.net",
+            IbmCloudObjectStorage => $"https://s3.{region}.cloud-object-storage.appdomain.cloud",
+            Storj => "https://gateway.storjshare.io",
+            VultrObjectStorage => $"https://{region}.vultrobjects.com",
+            LinodeObjectStorage => $"https://{region}.linodeobjects.com",
+            ScalewayObjectStorage => $"https://s3.{region}.scw.cloud",
+            OvhCloudObjectStorage => $"https://s3.{region}.io.cloud.ovh.net",
+            HetznerObjectStorage => $"https://{region}.your-objectstorage.com",
+            TigrisData => "https://fly.storage.tigris.dev",
+            BunnyStorage => region.Equals("de", StringComparison.OrdinalIgnoreCase)
+                ? "https://storage.bunnycdn.com"
+                : $"https://{region.ToLowerInvariant()}.storage.bunnycdn.com",
+            _ => ""
+        };
+    }
+
+    public static string DocumentationUrl(string provider) => provider switch
+    {
+        CloudflareR2 => "https://developers.cloudflare.com/r2/api/s3/",
+        BackblazeB2 => "https://www.backblaze.com/docs/cloud-storage-s3-compatible-api",
+        Wasabi => "https://docs.wasabi.com/docs/how-do-i-use-aws-sdk-for-net-with-wasabi",
+        GoogleCloudStorage => "https://cloud.google.com/storage/docs/authentication/hmackeys",
+        AzureBlobStorage => "https://learn.microsoft.com/azure/storage/blobs/storage-quickstart-blobs-dotnet",
+        OracleObjectStorage => "https://docs.oracle.com/iaas/Content/Object/Tasks/s3compatibleapi.htm",
+        IbmCloudObjectStorage => "https://cloud.ibm.com/docs/cloud-object-storage?topic=cloud-object-storage-compatibility-api",
+        Storj => "https://storj.dev/dcs/api/s3/s3-compatible-gateway",
+        IDriveE2 => "https://www.idrive.com/s3-storage-e2/developer-guide",
+        VultrObjectStorage => "https://docs.vultr.com/products/cloud-storage/object-storage/",
+        LinodeObjectStorage => "https://techdocs.akamai.com/cloud-computing/docs/object-storage",
+        ScalewayObjectStorage => "https://www.scaleway.com/en/docs/object-storage/api-cli/object-storage-aws-cli/",
+        OvhCloudObjectStorage => "https://help.ovhcloud.com/csm/en-public-cloud-storage-s3-api?id=kb_article_view&sysparm_article=KB0047364",
+        HetznerObjectStorage => "https://docs.hetzner.com/storage/object-storage/",
+        TigrisData => "https://www.tigrisdata.com/docs/sdks/s3/",
+        BunnyStorage => "https://docs.bunny.net/reference/storage-api",
+        DigitalOceanSpaces => "https://docs.digitalocean.com/products/spaces/how-to/manage-access/",
+        AmazonS3 => "https://docs.aws.amazon.com/AmazonS3/latest/userguide/GetStartedWithS3.html",
+        _ => "https://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html"
+    };
 }
 
 public sealed class GitHubRepository
 {
     public long Id { get; set; }
+    public string ExternalId { get; set; } = "";
+    public string ApiUrl { get; set; } = "";
     public string Name { get; set; } = "";
     public string FullName { get; set; } = "";
     public string HtmlUrl { get; set; } = "";
