@@ -229,6 +229,26 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                         _state.AgentRuntime.Settings.MaxOutputTokens = 65_536;
                     _state.Version = 17;
                 }
+                if (_state.Version < 18)
+                {
+                    if (_state.AgentRuntime.Settings.MaxOutputTokens == 65_536)
+                        _state.AgentRuntime.Settings.MaxOutputTokens = 8_192;
+                    else
+                        _state.AgentRuntime.Settings.MaxOutputTokens = Math.Clamp(
+                            _state.AgentRuntime.Settings.MaxOutputTokens, 32, 16_384);
+                    _state.Version = 18;
+                }
+                if (_state.Version < 19)
+                {
+                    _state.AgentRuntime.Settings.MaxFileOutputTokens = 32_768;
+                    _state.Version = 19;
+                }
+                if (_state.Version < 20)
+                {
+                    if (_state.AgentRuntime.Settings.MaxFileOutputTokens == 65_536)
+                        _state.AgentRuntime.Settings.MaxFileOutputTokens = 32_768;
+                    _state.Version = 20;
+                }
                 await SaveUnsafeAsync();
                 return;
             }

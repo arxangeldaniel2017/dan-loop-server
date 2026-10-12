@@ -10,41 +10,50 @@ public sealed class AgentRuntimeClient(HttpClient http, IDataProtectionProvider 
 {
     private readonly IDataProtector _protector = protectionProvider.CreateProtector("remote-model-api-keys-v1");
 
-    public async Task<AgentModelStep> CompleteStepAsync(RemoteModel model, IReadOnlyList<object> messages, AgentRuntimeSettings settings, CancellationToken cancellationToken, IReadOnlySet<string>? allowedTools = null, string? requiredTool = null, bool requireAnyTool = false, bool? streamOverride = null)
+    public async Task<AgentModelStep> CompleteStepAsync(RemoteModel model, IReadOnlyList<object> messages, AgentRuntimeSettings settings, CancellationToken cancellationToken, IReadOnlySet<string>? allowedTools = null, string? requiredTool = null, bool requireAnyTool = false, bool? streamOverride = null, bool useFileGenerationBudget = false)
     {
+        using var requestDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        requestDeadline.CancelAfter(TimeSpan.FromMinutes(15));
+        var requestCancellationToken = requestDeadline.Token;
         var useStreaming = streamOverride ?? settings.UseStreaming;
+        var maxOutputTokens = useFileGenerationBudget
+            ? Math.Clamp(settings.MaxFileOutputTokens, 32, 131_072)
+            : Math.Clamp(settings.MaxOutputTokens, 32, 16_384);
         object toolChoice = requiredTool is not null
             ? new { type = "function", function = new { name = requiredTool } }
             : requireAnyTool ? "required" : "auto";
         var toolDefinitions = AgentToolExecutor.ToolDefinitions(settings, allowedTools);
         if (AnthropicProtocol.Handles(model))
         {
-            using var anthropicRequest = AnthropicProtocol.CreateRequest(model, RevealKey(model), messages, toolDefinitions, toolChoice, settings.MaxOutputTokens);
-            using var anthropicResponse = await http.SendAsync(anthropicRequest, cancellationToken);
-            var anthropicBody = await anthropicResponse.Content.ReadAsStringAsync(cancellationToken);
+            using var anthropicRequest = AnthropicProtocol.CreateRequest(model, RevealKey(model), messages, toolDefinitions, toolChoice, maxOutputTokens);
+            using var anthropicResponse = await http.SendAsync(anthropicRequest, requestCancellationToken);
+            var anthropicBody = await anthropicResponse.Content.ReadAsStringAsync(requestCancellationToken);
             if (!anthropicResponse.IsSuccessStatusCode) throw RemoteError(anthropicResponse, anthropicBody);
             return AnthropicProtocol.ParseStep(anthropicBody);
         }
-        var payload = new
+        var payload = new Dictionary<string, object?>
         {
-            model = model.ModelId,
-            messages,
-            tools = toolDefinitions,
-            tool_choice = toolChoice,
-            stream = useStreaming,
-            temperature = 0.2
+            ["model"] = model.ModelId,
+            ["messages"] = messages,
+            ["tools"] = toolDefinitions,
+            ["tool_choice"] = toolChoice,
+            ["stream"] = useStreaming,
+            ["max_tokens"] = maxOutputTokens,
+            ["temperature"] = 0.2
         };
+        if (model.ModelId.Contains("qwen", StringComparison.OrdinalIgnoreCase))
+            payload["chat_template_kwargs"] = new { enable_thinking = false, preserve_thinking = false };
         using var request = new HttpRequestMessage(HttpMethod.Post, model.BaseUrl.TrimEnd('/') + "/chat/completions") { Content = JsonContent.Create(payload) };
         AiRequestAuthentication.Apply(request, model, string.IsNullOrEmpty(model.ProtectedApiKey) ? "" : _protector.Unprotect(model.ProtectedApiKey));
-        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestCancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(requestCancellationToken);
             throw RemoteError(response, body);
         }
         return useStreaming
-            ? await ReadStreamingAsync(response, cancellationToken)
-            : ParseComplete(await response.Content.ReadAsStringAsync(cancellationToken));
+            ? await ReadStreamingAsync(response, requestCancellationToken)
+            : ParseComplete(await response.Content.ReadAsStringAsync(requestCancellationToken));
     }
 
     private string RevealKey(RemoteModel model) => string.IsNullOrEmpty(model.ProtectedApiKey) ? "" : _protector.Unprotect(model.ProtectedApiKey);

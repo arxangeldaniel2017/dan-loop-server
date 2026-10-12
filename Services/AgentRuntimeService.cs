@@ -25,7 +25,9 @@ public sealed class AgentRuntimeService(AgentRuntimeClient client, AgentToolExec
         for (var stepNumber = 1; stepNumber <= maximumSteps; stepNumber++)
         {
             var policy = ToolPolicy(planExisted, changedPaths, unpublishedPaths, requirePublishing, forceImplementationAction, stepNumber);
-            var step = await client.CompleteStepAsync(model, messages, settings, cancellationToken, policy.Allowed, policy.Required, policy.RequireAny, policy.Stream);
+            var useFileGenerationBudget = IsFileMutationTool(policy.Required) ||
+                                          policy.RequireAny && policy.Allowed?.Any(IsFileMutationTool) == true;
+            var step = await client.CompleteStepAsync(model, messages, settings, cancellationToken, policy.Allowed, policy.Required, policy.RequireAny, policy.Stream, useFileGenerationBudget);
             var structured = step.ToolCalls.Count > 0;
             var calls = structured ? step.ToolCalls : ParseFallbackToolCalls(step.Content);
             if (structured && calls.Any(call => !IsValidArguments(call.ArgumentsJson)))
@@ -215,6 +217,11 @@ CURRENT PROJECT GUIDE:
     }
 
     private static bool IsPlan(string path) => NormalizePath(path).Equals("PLAN.md", StringComparison.OrdinalIgnoreCase);
+    private static bool IsFileMutationTool(string? name) =>
+        name is not null && (name.Equals("write_file", StringComparison.OrdinalIgnoreCase) ||
+                             name.Equals("replace_in_file", StringComparison.OrdinalIgnoreCase) ||
+                             name.Equals("generate_asset", StringComparison.OrdinalIgnoreCase));
+
     private static bool IsImplementationPath(string path)
     {
         var normalized = NormalizePath(path);

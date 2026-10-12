@@ -14,7 +14,8 @@ public sealed class AgentRuntimeSettings
     public bool AllowFileWrite { get; set; } = true;
     public bool AllowGitHubPublish { get; set; } = true;
     public int MaxSteps { get; set; } = 20;
-    public int MaxOutputTokens { get; set; } = 65_536;
+    public int MaxOutputTokens { get; set; } = 8_192;
+    public int MaxFileOutputTokens { get; set; } = 32_768;
     public int MaxToolOutputCharacters { get; set; } = 50_000;
 }
 

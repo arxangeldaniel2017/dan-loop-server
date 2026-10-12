@@ -21,7 +21,8 @@
         </div></section>
         <section class="runtime-form-section"><h3>Execution limits</h3><div class="runtime-limit-grid">
             <label>Maximum agent steps<input type="number" name="maxSteps" min="1" max="50" value="@settings.MaxSteps"/><small class="field-help">Maximum tool-and-model cycles for one job.</small></label>
-            <label>Anthropic output tokens<input type="number" name="maxOutputTokens" min="32" value="@settings.MaxOutputTokens"/><small class="field-help">Required by the Anthropic protocol; no app maximum is imposed. OpenAI-compatible agent requests have no token cap.</small></label>
+            <label>Standard output tokens<input type="number" name="maxOutputTokens" min="32" max="16384" value="@settings.MaxOutputTokens"/><small class="field-help">Used for inspection, planning, and final text responses.</small></label>
+            <label>File/code output tokens<input type="number" name="maxFileOutputTokens" min="32" max="131072" value="@settings.MaxFileOutputTokens"/><small class="field-help">Used only when the agent is required to write or replace project files or generate an asset. The selected model/provider may impose a lower limit.</small></label>
             <label>Tool output limit<input type="number" name="maxToolOutputCharacters" min="1000" max="100000" value="@settings.MaxToolOutputCharacters"/><small class="field-help">Maximum characters returned by one file tool.</small></label>
         </div></section>
         <p class="runtime-policy-note">Git publishing works only for a repository assigned under the connections tab and while that provider credential has write permission. AI-created changes are grouped into background commits; user uploads and user edits are excluded unless selected in the file manager. Every project is stored under its own repository folder. It never enables terminal access.</p>
