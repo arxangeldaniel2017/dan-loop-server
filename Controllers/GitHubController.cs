@@ -25,7 +25,7 @@ public sealed class GitHubController(
     [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> ConnectToken(string token, string? returnUrl, CancellationToken cancellationToken)
     {
-        var destination = Url.IsLocalUrl(returnUrl) ? returnUrl! : "/#github";
+        var destination = Url.IsLocalUrl(returnUrl) ? returnUrl! : "/#connections";
         try
         {
             var connection = await gitHub.LoadTokenConnectionAsync(token, cancellationToken);
@@ -47,7 +47,7 @@ public sealed class GitHubController(
     public IActionResult Connect(string? returnUrl = null)
     {
         if (!gitHub.IsConfigured) return Back(gitHub.ConfigurationMessage, returnUrl);
-        var destination = Url.IsLocalUrl(returnUrl) ? returnUrl! : "/#github";
+        var destination = Url.IsLocalUrl(returnUrl) ? returnUrl! : "/#connections";
         var state = Protect(new FlowState(CurrentUserId(), destination, DateTimeOffset.UtcNow.AddMinutes(15)));
         var callback = Url.ActionLink(nameof(OAuthCallback), "GitHub", protocol: Request.Scheme)!;
         return Redirect(gitHub.CreateAuthorizationUrl(callback, state));
@@ -57,7 +57,7 @@ public sealed class GitHubController(
     public async Task<IActionResult> OAuthCallback(string? code, string? state, string? error, CancellationToken cancellationToken)
     {
         var flow = Unprotect(state);
-        if (flow is null) return Back("The GitHub authorization request expired or is invalid.", "/#github");
+        if (flow is null) return Back("The GitHub authorization request expired or is invalid.", "/#connections");
         if (!string.IsNullOrEmpty(error) || string.IsNullOrWhiteSpace(code))
             return Back("GitHub authorization was cancelled.", flow.ReturnUrl);
 
@@ -93,8 +93,8 @@ public sealed class GitHubController(
         if (flow is null || pending is null || flow.UserId != pending.UserId || installation_id is null)
         {
             if (installation_id is not null && await RefreshExistingInstallationAsync(installation_id.Value, cancellationToken))
-                return Back("GitHub repository access updated.", "/#github");
-            return Back("The GitHub installation request expired or is invalid.", "/#github");
+                return Back("GitHub repository access updated.", "/#connections");
+            return Back("The GitHub installation request expired or is invalid.", "/#connections");
         }
 
         try
@@ -153,12 +153,12 @@ public sealed class GitHubController(
                 RemoveUnavailableMappings(state, connection);
                 return true;
             });
-            return Back("GitHub repositories refreshed.", "/#github");
+            return Back("GitHub repositories refreshed.", "/#connections");
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Could not refresh GitHub connection {ConnectionId}", id);
-            return Back("Could not refresh the GitHub connection.", "/#github");
+            return Back("Could not refresh the GitHub connection.", "/#connections");
         }
     }
 
@@ -176,7 +176,7 @@ public sealed class GitHubController(
             CleanupResultRepositories(state);
             return true;
         });
-        return Back("Project repositories updated.", "/#github");
+        return Back("Project repositories updated.", "/#connections");
     }
 
     [HttpPost, ValidateAntiForgeryToken]
@@ -190,7 +190,7 @@ public sealed class GitHubController(
             if (allowed) project.ResultsRepositoryId = repositoryId;
             return allowed;
         });
-        return Back(repositoryId is null ? "Results will remain local." : "Results repository updated.", "/#github");
+        return Back(repositoryId is null ? "Results will remain local." : "Results repository updated.", "/#connections");
     }
 
     [HttpPost, ValidateAntiForgeryToken]
@@ -209,7 +209,7 @@ public sealed class GitHubController(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Could not import GitHub repository {RepositoryId}", repositoryId);
-            return Back("Could not import the GitHub repository: " + ex.Message, "/#github");
+            return Back("Could not import the GitHub repository: " + ex.Message, "/#connections");
         }
     }
 
@@ -224,7 +224,7 @@ public sealed class GitHubController(
             foreach (var project in state.Projects.Where(x => x.ResultsRepositoryId is not null && removedRepositoryIds.Contains(x.ResultsRepositoryId.Value))) project.ResultsRepositoryId = null;
             return true;
         });
-        return Back("GitHub connection and its stored credential were removed from this server.", "/#github");
+        return Back("GitHub connection and its stored credential were removed from this server.", "/#connections");
     }
 
     private Guid CurrentUserId() => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -293,7 +293,7 @@ public sealed class GitHubController(
     private IActionResult Back(string message, string? returnUrl)
     {
         TempData["Message"] = message;
-        return LocalRedirect(Url.IsLocalUrl(returnUrl) ? returnUrl! : "/#github");
+        return LocalRedirect(Url.IsLocalUrl(returnUrl) ? returnUrl! : "/#connections");
     }
 
     private sealed record FlowState(Guid UserId, string ReturnUrl, DateTimeOffset ExpiresAt);

@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using DanLoopServer.Models;
@@ -423,11 +425,24 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
     private string NextFolderName(string projectName)
     {
         Directory.CreateDirectory(_root);
-        var name = SafeSegment(projectName);
+        var name = SafeProjectName(projectName);
         var number = 1;
         string candidate;
         do candidate = $"{name}-{number++}"; while (Directory.Exists(Path.Combine(_root, candidate)));
         return candidate;
+    }
+
+    private static string SafeProjectName(string value)
+    {
+        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var ascii = new string(decomposed.Where(character => character <= 127 &&
+            CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+            .Select(character => char.IsLetterOrDigit(character) ? char.ToLowerInvariant(character) : '-')
+            .ToArray());
+        var slug = Regex.Replace(ascii, "-+", "-").Trim('-');
+        if (string.IsNullOrWhiteSpace(slug))
+            slug = "project-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..10].ToLowerInvariant();
+        return slug[..Math.Min(slug.Length, 45)];
     }
 
     private string StagingPath(Guid id) => Path.Combine(_root, ".staging", id.ToString("N"));

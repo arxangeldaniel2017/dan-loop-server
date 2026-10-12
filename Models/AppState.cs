@@ -2,7 +2,7 @@ namespace DanLoopServer.Models;
 
 public sealed class AppState
 {
-    public int Version { get; set; } = 10;
+    public int Version { get; set; } = 11;
     public List<AppUser> Users { get; set; } = [];
     public List<Project> Projects { get; set; } = [];
     public List<LoopDefinition> Loops { get; set; } = [];
@@ -150,6 +150,8 @@ public static class PlanStepStatuses
     public const string Succeeded = "Succeeded";
     public const string Failed = "Failed";
     public const string Skipped = "Skipped";
+    public const string Paused = "Paused";
+    public const string Cancelled = "Cancelled";
 }
 
 public static class JobStatuses

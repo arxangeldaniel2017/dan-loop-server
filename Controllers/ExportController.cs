@@ -139,7 +139,7 @@ public sealed class ExportController(StateStore store, WorkspaceService workspac
     public async Task<IActionResult> Models()
     {
         var state = await store.ReadAsync(value => value);
-        return Csv("models", ["Model ID", "Name", "Model identifier", "Base URL", "Enabled"], state.Models.Select(item => new object?[] { item.Id, item.Name, item.ModelId, item.BaseUrl, item.IsEnabled }));
+        return Csv("models", ["Connection ID", "Provider", "Name", "Model identifier", "Base URL", "Priority", "Capabilities", "Enabled", "Last test"], state.Models.Select(item => new object?[] { item.Id, item.ProviderId, item.Name, item.ModelId, item.BaseUrl, item.Priority, string.Join(", ", AiCapabilities.Effective(item)), item.IsEnabled, item.LastTestStatus }));
     }
 
     [HttpGet, Authorize(Roles = Roles.Admin)]

@@ -131,6 +131,35 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                     foreach (var job in _state.Jobs) job.FailedModelIds ??= [];
                     _state.Version = 10;
                 }
+                if (_state.Version < 11)
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    var stoppedLoopIds = _state.Loops.Where(loop => !loop.IsEnabled).Select(loop => loop.Id).ToHashSet();
+                    foreach (var job in _state.Jobs.Where(job => job.LoopId is Guid loopId && stoppedLoopIds.Contains(loopId) && job.Status is JobStatuses.Queued or JobStatuses.Running))
+                    {
+                        job.Status = JobStatuses.Cancelled;
+                        job.Error = "Cancelled because the recurring loop was stopped.";
+                        job.CompletedAt = now;
+                    }
+                    foreach (var plan in _state.ExecutionPlans)
+                    {
+                        foreach (var step in plan.Steps.Where(step => step.Status == PlanStepStatuses.Running))
+                        {
+                            var activeAttempt = step.Attempts.LastOrDefault(attempt => attempt.Status == PlanStepStatuses.Running);
+                            var activeJob = activeAttempt is null ? null : _state.Jobs.FirstOrDefault(job => job.Id == activeAttempt.JobId);
+                            if (activeJob?.Status == JobStatuses.Running) continue;
+                            if (activeAttempt is not null)
+                            {
+                                activeAttempt.Status = PlanStepStatuses.Cancelled;
+                                activeAttempt.Summary = "Execution was no longer active and was closed during state recovery.";
+                                activeAttempt.CompletedAt ??= now;
+                            }
+                            step.Status = PlanStepStatuses.Paused;
+                            plan.UpdatedAt = now;
+                        }
+                    }
+                    _state.Version = 11;
+                }
                 await SaveUnsafeAsync();
                 return;
             }

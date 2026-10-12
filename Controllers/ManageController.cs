@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace DanLoopServer.Controllers;
 
 [Authorize]
-public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, WorkspaceService workspace, GitHubService gitHub, ProjectPlanService plans) : Controller
+public sealed class ManageController(StateStore store, PasswordService passwords, RemoteModelClient modelClient, WorkspaceService workspace, GitHubService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations) : Controller
 {
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
     public async Task<IActionResult> CreateProject(string? name, string? description, string? systemPrompt, Guid? defaultModelId)
@@ -59,8 +59,28 @@ public sealed class ManageController(StateStore store, PasswordService passwords
         var loop = await store.ReadAsync(s => s.Loops.FirstOrDefault(x => x.Id == id));
         if (loop is null) return NotFound();
         if (!await CanAsync(loop.ProjectId, manage: true)) return Forbid();
-        await store.UpdateAsync(s => { var x = s.Loops.First(y => y.Id == id); x.IsEnabled = !x.IsEnabled; x.LastQueuedAt = null; return true; });
-        return Back("Loop status changed.");
+        var result = await store.UpdateAsync(state =>
+        {
+            var current = state.Loops.First(item => item.Id == id);
+            current.IsEnabled = !current.IsEnabled;
+            current.LastQueuedAt = null;
+            var stoppedJobIds = new List<Guid>();
+            if (!current.IsEnabled)
+            {
+                foreach (var job in state.Jobs.Where(item => item.LoopId == id && item.Status is JobStatuses.Queued or JobStatuses.Running))
+                {
+                    job.Status = JobStatuses.Cancelled;
+                    job.Error = "Cancelled because the recurring loop was stopped.";
+                    job.CompletedAt = DateTimeOffset.UtcNow;
+                    stoppedJobIds.Add(job.Id);
+                }
+                state.Messages.Add(new AppMessage { ProjectId = current.ProjectId, Level = MessageLevels.Info, Text = $"Loop '{current.Name}' stopped. {stoppedJobIds.Count} unfinished execution(s) were cancelled." });
+            }
+            return new { current.IsEnabled, JobIds = stoppedJobIds };
+        });
+        foreach (var jobId in result.JobIds) cancellations.Cancel(jobId);
+        if (!result.IsEnabled) await plans.CancelJobsAsync(result.JobIds, "Execution stopped because the recurring loop was stopped.");
+        return Back(result.IsEnabled ? "Loop enabled." : $"Loop stopped. {result.JobIds.Count} unfinished execution(s) cancelled.");
     }
 
     [HttpPost, ValidateAntiForgeryToken]
@@ -104,7 +124,19 @@ public sealed class ManageController(StateStore store, PasswordService passwords
         var job = await store.ReadAsync(s => s.Jobs.FirstOrDefault(x => x.Id == id));
         if (job is null) return NotFound();
         if (!await CanAsync(job.ProjectId, run: true)) return Forbid();
-        await store.UpdateAsync(s => { var x = s.Jobs.First(y => y.Id == id); if (x.Status is JobStatuses.Queued or JobStatuses.Running) x.Status = JobStatuses.Cancelled; return true; });
+        await store.UpdateAsync(state =>
+        {
+            var current = state.Jobs.First(item => item.Id == id);
+            if (current.Status is JobStatuses.Queued or JobStatuses.Running)
+            {
+                current.Status = JobStatuses.Cancelled;
+                current.Error = "Cancelled by user.";
+                current.CompletedAt = DateTimeOffset.UtcNow;
+            }
+            return true;
+        });
+        cancellations.Cancel(id);
+        await plans.CancelJobsAsync([id], "Execution cancelled by user.");
         return Back("Job cancelled.");
     }
 

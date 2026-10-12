@@ -9,7 +9,7 @@
 
 <section class="hero">
     <div><p class="eyebrow">ORCHESTRATION CONTROL PLANE</p><h1>Loops that keep moving.</h1><p>Manage prompts, recurring work, remote models and access from one local dashboard.</p></div>
-    <div class="metrics"><div><strong>@Model.VisibleProjects.Count</strong><span>projects</span></div><div><strong>@Model.State.Loops.Count(x => x.IsEnabled)</strong><span>live loops</span></div><div><strong>@Model.State.Jobs.Count(x => x.Status == JobStatuses.Running || x.Status == JobStatuses.Queued)</strong><span>active jobs</span></div></div>
+    <div class="metrics"><div><strong>@Model.VisibleProjects.Count</strong><span>projects</span></div><div><strong>@Model.State.Loops.Count(x => x.IsEnabled)</strong><span>live loops</span></div></div>
 </section>
 
 @if (TempData["Message"] is string message) { <div class="notice">@message</div> }
@@ -160,13 +160,13 @@
     <div class="section-title"><div><p class="eyebrow">SOURCE CONTROL & AUTOMATION</p><h2>GitHub connections</h2></div><a class="button secondary" asp-controller="Export" asp-action="GitHub">Export CSV</a></div>
     <details class="create-box"><summary>＋ Connect with fine-grained token</summary>
         <form asp-controller="GitHub" asp-action="ConnectToken" method="post" class="form-grid compact">
-            <input type="hidden" name="returnUrl" value="/#github" />
+            <input type="hidden" name="returnUrl" value="/#connections" />
             <label class="wide">Fine-grained access token<input name="token" type="password" required autocomplete="off" spellcheck="false" placeholder="github_pat_…" /></label>
             <p class="wide form-help"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token on GitHub ↗</a>. Repository access and capabilities are limited to what you select there. The token is encrypted at rest.</p>
             <button>Connect GitHub</button>
         </form>
     </details>
-    @if (GitHub.IsConfigured) { <details class="configuration-note"><summary>Advanced GitHub App connection</summary><a class="button secondary" asp-controller="GitHub" asp-action="Connect" asp-route-returnUrl="/#github">Connect configured GitHub App</a></details> }
+    @if (GitHub.IsConfigured) { <details class="configuration-note"><summary>Advanced GitHub App connection</summary><a class="button secondary" asp-controller="GitHub" asp-action="Connect" asp-route-returnUrl="/#connections">Connect configured GitHub App</a></details> }
     @if (!Model.State.GitHubConnections.Any())
     {
         <div class="empty">No GitHub accounts are connected yet.</div>

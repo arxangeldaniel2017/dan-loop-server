@@ -3,7 +3,7 @@ using DanLoopServer.Models;
 
 namespace DanLoopServer.Services;
 
-public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore store, GitHubService gitHub)
+public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore store, GitHubService gitHub, S3ObjectStorage objectStorage)
 {
     private static readonly HashSet<string> InternalFolders = new(StringComparer.OrdinalIgnoreCase) { ".git", ".history", ".trash", ".staging", ".undo" };
 
@@ -27,6 +27,10 @@ public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore sto
         }
         if (settings.AllowGitHubPublish && Allowed("publish_project_files"))
             definitions.Add(Tool("publish_project_files", "Commit selected project files to the project's assigned GitHub repository through the connected GitHub API. No terminal or local Git is used.", new { type = "object", properties = new { paths = new { type = "array", items = new { type = "string" } }, message = new { type = "string" } }, required = new[] { "paths", "message" } }));
+        if (Allowed("object_storage_status"))
+            definitions.Add(Tool("object_storage_status", "Show whether S3-compatible project storage is active. It exposes no credentials and remains scoped to this project.", new { type = "object", properties = new { } }));
+        if (Allowed("sync_project_storage"))
+            definitions.Add(Tool("sync_project_storage", "Synchronize project files to configured S3-compatible storage or DigitalOcean Spaces. This never exposes credentials or another project's files.", new { type = "object", properties = new { } }));
         return [.. definitions];
     }
 
@@ -41,6 +45,7 @@ public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore sto
         if (settings.AllowFileRead) available.AddRange(["browse project folders", "read project text files"]);
         if (settings.AllowFileWrite) available.AddRange(["write project files", "replace text in project files"]);
         if (settings.AllowGitHubPublish) available.Add("queue AI-created files for background GitHub publishing; publish selected files immediately only when explicitly requested");
+        if (objectStorage.IsEnabled) available.Add("inspect and synchronize configured S3-compatible project storage");
         var project = await store.ReadAsync(state => state.Projects.First(item => item.Id == projectId));
         return $"""
                Project workspace: logical root `/` (project-relative paths only; this is not the server root).
@@ -48,6 +53,7 @@ public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore sto
                Available operations: {string.Join(", ", available)}. The read tool returns text directly and binary files as Base64 chunks.
                GitHub destination: {(target is null ? "not assigned" : target.Value.Repository.FullName)}.
                GitHub project folder: {StateStore.ProjectRepositoryFolder(project)}. AI-created changes are batched and published there in the background; user-uploaded and user-edited files require explicit selection in the file manager.
+               Object storage: {(objectStorage.IsEnabled ? "configured; project files synchronize automatically and can be synchronized on demand" : "not configured; local project storage is active")}.
                Unavailable operations: shell, terminal, Bash, commands, builds, tests, programs, package managers, server file listing, local Git, local commits, local pushes, secrets, and paths outside this project.
                """;
     }
@@ -66,6 +72,8 @@ public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore sto
                 "write_file" when settings.AllowFileWrite => await WriteFileAsync(projectId, arguments),
                 "replace_in_file" when settings.AllowFileWrite => await ReplaceInFileAsync(projectId, arguments),
                 "publish_project_files" when settings.AllowGitHubPublish => await PublishProjectFilesAsync(projectId, arguments, cancellationToken),
+                "object_storage_status" => new AgentToolResult { Success = true, Summary = "Object storage status", Output = objectStorage.IsEnabled ? "S3-compatible project storage is active. This project's files are mirrored under its isolated project namespace." : "S3-compatible storage is not configured; this project is using local storage." },
+                "sync_project_storage" when objectStorage.IsEnabled => await SyncObjectStorageAsync(cancellationToken),
                 "run_command" or "bash" => BlockedCommand(call.Name),
                 _ => new AgentToolResult { Success = false, Summary = call.Name, Output = "Tool is disabled or unknown. Use workspace_guide to see the project-scoped tools." }
             };
@@ -75,6 +83,12 @@ public sealed class AgentToolExecutor(WorkspaceService workspace, StateStore sto
     }
 
     public async Task<bool> HasGitHubTargetAsync(Guid projectId) => await ResolveGitHubTargetAsync(projectId) is not null;
+
+    private async Task<AgentToolResult> SyncObjectStorageAsync(CancellationToken cancellationToken)
+    {
+        await objectStorage.SyncAsync(cancellationToken);
+        return new AgentToolResult { Success = true, Summary = "Synchronized object storage", Output = "Project file synchronization with S3-compatible storage completed." };
+    }
 
     private static AgentToolResult BlockedCommand(string name) => new()
     {

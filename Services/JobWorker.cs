@@ -2,7 +2,7 @@ using DanLoopServer.Models;
 
 namespace DanLoopServer.Services;
 
-public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentRuntimeService runtime, WorkspaceService workspace, GitHubService gitHub, ProjectPlanService plans, ILogger<JobWorker> logger) : BackgroundService
+public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentRuntimeService runtime, WorkspaceService workspace, GitHubService gitHub, ProjectPlanService plans, JobCancellationRegistry cancellations, ILogger<JobWorker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -19,7 +19,12 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
                     job.StartedAt = DateTimeOffset.UtcNow;
                     return new Job { Id = job.Id, ProjectId = job.ProjectId, LoopId = job.LoopId, ModelId = job.ModelId, RequiredCapability = job.RequiredCapability, FailedModelIds = job.FailedModelIds.ToList(), Prompt = job.Prompt, ConversationId = job.ConversationId, AttachmentPaths = job.AttachmentPaths, PlanStepId = job.PlanStepId, PlanStepTitle = job.PlanStepTitle };
                 });
-                if (next is not null) await RunAsync(next, stoppingToken);
+                if (next is not null)
+                {
+                    using var execution = cancellations.Register(next.Id, stoppingToken);
+                    var stillRunning = await store.ReadAsync(state => state.Jobs.FirstOrDefault(item => item.Id == next.Id)?.Status == JobStatuses.Running);
+                    if (stillRunning) await RunAsync(next, execution.Token, stoppingToken);
+                }
                 else await Task.Delay(1000, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
@@ -38,6 +43,9 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
         {
             var executionCount = Math.Max(loop.ExecutionCount, state.Jobs.Count(x => x.LoopId == loop.Id));
             loop.ExecutionCount = executionCount;
+            // A recurring loop owns one execution at a time. Slow work must not build an
+            // ever-growing queue behind the active execution.
+            if (state.Jobs.Any(job => job.LoopId == loop.Id && job.Status is JobStatuses.Queued or JobStatuses.Running)) continue;
             if (loop.LastQueuedAt is not null && now - loop.LastQueuedAt < TimeSpan.FromSeconds(Math.Max(10, loop.IntervalSeconds))) continue;
             if (loop.MaxExecutions is int maximum && executionCount >= maximum)
             {
@@ -62,7 +70,7 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
         return true;
     });
 
-    private async Task RunAsync(Job job, CancellationToken cancellationToken)
+    private async Task RunAsync(Job job, CancellationToken cancellationToken, CancellationToken applicationStoppingToken)
     {
         var projectRoot = await workspace.ResolveProjectPathAsync(job.ProjectId, "");
         var requiredCapability = string.IsNullOrWhiteSpace(job.RequiredCapability)
@@ -173,6 +181,12 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            var wasCancelledByUser = await store.ReadAsync(state => state.Jobs.FirstOrDefault(item => item.Id == job.Id)?.Status == JobStatuses.Cancelled);
+            if (wasCancelledByUser)
+            {
+                await plans.CancelJobsAsync([job.Id], "Execution stopped because its job or recurring loop was stopped.");
+                return;
+            }
             await plans.InterruptJobAsync(job.Id);
             await store.UpdateAsync(state =>
             {
@@ -185,7 +199,7 @@ public sealed class JobWorker(StateStore store, RemoteModelClient client, AgentR
                 }
                 return true;
             });
-            throw;
+            if (applicationStoppingToken.IsCancellationRequested) throw;
         }
         catch (Exception ex)
         {

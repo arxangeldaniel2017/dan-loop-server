@@ -416,13 +416,11 @@ public sealed class FilesController(StateStore store, WorkspaceService workspace
             return new
             {
                 ProjectCount = state.Projects.Count(project => projectIds.Contains(project.Id)),
-                LiveLoopCount = state.Loops.Count(loop => projectIds.Contains(loop.ProjectId) && loop.IsEnabled),
-                ActiveJobCount = state.Jobs.Count(job => projectIds.Contains(job.ProjectId) && job.Status is JobStatuses.Running or JobStatuses.Queued)
+                LiveLoopCount = state.Loops.Count(loop => projectIds.Contains(loop.ProjectId) && loop.IsEnabled)
             };
         });
         ViewBag.DashboardProjectCount = summary.ProjectCount;
         ViewBag.DashboardLiveLoopCount = summary.LiveLoopCount;
-        ViewBag.DashboardActiveJobCount = summary.ActiveJobCount;
         ViewBag.DashboardIsAdmin = isAdmin;
     }
     private async Task<Project?> GetProjectAsync(Guid id, bool manage)

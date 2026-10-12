@@ -226,7 +226,14 @@ public sealed class S3ObjectStorage : IAsyncDisposable
         !string.IsNullOrWhiteSpace(value) && !Path.IsPathRooted(value) &&
         !value.Split('/', '\\').Any(segment => segment is "" or "." or "..");
 
-    private string ObjectKey(string relativePath) => string.IsNullOrEmpty(_prefix) ? relativePath : $"{_prefix}/{relativePath}";
+    private string ObjectKey(string relativePath)
+    {
+        if (relativePath == ManifestName) return string.IsNullOrEmpty(_prefix) ? relativePath : $"{_prefix}/{relativePath}";
+        var parts = relativePath.Replace('\\', '/').Split('/', 2);
+        var projectNamespace = SafeObjectSegment(parts[0]);
+        var objectPath = parts.Length == 1 ? projectNamespace : $"{projectNamespace}/{parts[1]}";
+        return string.IsNullOrEmpty(_prefix) ? objectPath : $"{_prefix}/{objectPath}";
+    }
     private string PrefixWithSlash() => string.IsNullOrEmpty(_prefix) ? "" : _prefix + "/";
 
     private static async Task<string> HashAsync(string file, CancellationToken cancellationToken)
@@ -243,6 +250,18 @@ public sealed class S3ObjectStorage : IAsyncDisposable
         if (endpoint is null || !endpoint.Contains("digitaloceanspaces.com", StringComparison.OrdinalIgnoreCase)) return null;
         var host = Uri.TryCreate(NormalizeEndpoint(endpoint), UriKind.Absolute, out var uri) ? uri.Host : endpoint;
         return host.Split('.')[0];
+    }
+
+    private static string SafeObjectSegment(string value)
+    {
+        var ascii = new string(value.Normalize(System.Text.NormalizationForm.FormD)
+            .Where(character => character <= 127 && char.GetUnicodeCategory(character) != System.Globalization.UnicodeCategory.NonSpacingMark)
+            .Select(character => char.IsLetterOrDigit(character) ? char.ToLowerInvariant(character) : '-')
+            .ToArray());
+        var slug = System.Text.RegularExpressions.Regex.Replace(ascii, "-+", "-").Trim('-');
+        if (string.IsNullOrWhiteSpace(slug))
+            slug = "project-" + Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(value)))[..10].ToLowerInvariant();
+        return slug[..Math.Min(50, slug.Length)];
     }
 
     public async ValueTask DisposeAsync()

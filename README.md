@@ -25,7 +25,7 @@ For an ambiguous semicolon-style `DefaultConnection`, set `DB_PROVIDER=postgresq
 
 ### S3-compatible project file storage
 
-Project files can be persisted in Amazon S3, DigitalOcean Spaces, MinIO, or another S3-compatible service. The existing local project directory remains a working cache, so previews, editing, AI file tools, downloads, and GitHub publishing continue to work normally. Remote files are restored on startup and local changes are synchronized in the background every 15 seconds.
+Project files can be persisted in Amazon S3, DigitalOcean Spaces, MinIO, or another S3-compatible service. The existing local project directory remains a working cache, so previews, editing, AI file tools, downloads, and GitHub publishing continue to work normally. Remote files are restored on startup and local changes are synchronized in the background every 15 seconds. Each project receives an isolated, bucket-safe namespace derived from its project workspace name; spaces and unsupported characters become dashes, non-Latin-only names receive a deterministic English `project-…` name, and name collisions retain the workspace suffix.
 
 Set a bucket plus the relevant connection values:
 
@@ -52,7 +52,11 @@ docker compose down -v
 
 ## Remote models
 
-The server uses the OpenAI-compatible `POST /chat/completions` API. For a model running directly on the Mac, use a base URL reachable from Docker, for example:
+The server loads its provider/model defaults from `Data/ai-connections.json` and copies the catalog into SQLite or the configured managed database at startup. Add or update catalog entries in that JSON file when providers change; saved user connections and capability choices remain separate.
+
+Each AI connection can be assigned Planner, Coder, Orchestrator, Tool calling, Generator, Image, Audio, Video, and Files capabilities. Jobs select enabled connections by capability and priority. A failed connection is recorded and the job is re-queued with the next eligible connection. When the user has not selected any capabilities, the catalog defaults (or safe model-name inference for custom models) are used.
+
+The current execution client uses the OpenAI-compatible `POST /chat/completions` API. For a model running directly on the Mac, use a base URL reachable from Docker, for example:
 
 - Ollama OpenAI compatibility: `http://host.docker.internal:11434/v1`
 - LM Studio: `http://host.docker.internal:1234/v1`

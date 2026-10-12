@@ -108,6 +108,31 @@ public sealed class ProjectPlanService(StateStore store, WorkspaceService worksp
         return true;
     });
 
+    public Task CancelJobsAsync(IEnumerable<Guid> jobIds, string reason) => store.UpdateAsync(state =>
+    {
+        var changed = false;
+        foreach (var jobId in jobIds.Distinct())
+        {
+            var job = state.Jobs.FirstOrDefault(item => item.Id == jobId);
+            if (job?.PlanStepId is not Guid stepId) continue;
+            var plan = state.ExecutionPlans.FirstOrDefault(item => item.ProjectId == job.ProjectId);
+            var step = plan?.Steps.FirstOrDefault(item => item.Id == stepId);
+            var attempt = step?.Attempts.FirstOrDefault(item => item.JobId == jobId);
+            if (step is null || attempt is null) continue;
+            if (attempt.Status is PlanStepStatuses.Running or PlanStepStatuses.Retrying)
+            {
+                attempt.Status = PlanStepStatuses.Cancelled;
+                attempt.Summary = reason;
+                attempt.CompletedAt = DateTimeOffset.UtcNow;
+            }
+            if (step.Status is PlanStepStatuses.Running or PlanStepStatuses.Retrying)
+                step.Status = PlanStepStatuses.Paused;
+            plan!.UpdatedAt = DateTimeOffset.UtcNow;
+            changed = true;
+        }
+        return changed;
+    });
+
     public Task SetRetryLimitAsync(Guid projectId, Guid stepId, int? retryLimit) => store.UpdateAsync(state =>
     {
         var step = state.ExecutionPlans.First(item => item.ProjectId == projectId).Steps.First(item => item.Id == stepId);
@@ -180,7 +205,7 @@ public sealed class ProjectPlanService(StateStore store, WorkspaceService worksp
         return string.Join('\n', lines);
     }
 
-    private static bool IsEligible(ProjectPlanStep step) => step.Status is PlanStepStatuses.Pending or PlanStepStatuses.Retrying or PlanStepStatuses.Running
+    private static bool IsEligible(ProjectPlanStep step) => step.Status is PlanStepStatuses.Pending or PlanStepStatuses.Retrying or PlanStepStatuses.Running or PlanStepStatuses.Paused
         && (step.RetryLimit is null || step.Attempts.Count < step.RetryLimit || step.Status == PlanStepStatuses.Running);
     private static string Normalize(string value) => Regex.Replace(value.Trim(), @"^\d+[.)]\s*", "").Trim().ToLowerInvariant();
     private static ProjectPlanStep CloneStep(ProjectPlanStep step) => new() { Id = step.Id, Order = step.Order, Title = step.Title, Status = step.Status, RetryLimit = step.RetryLimit, Attempts = step.Attempts.ToList() };

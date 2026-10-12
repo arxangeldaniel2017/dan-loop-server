@@ -33,6 +33,7 @@ builder.Services.AddSingleton<AiConnectionCatalogService>();
 builder.Services.AddSingleton<PasswordService>();
 builder.Services.AddSingleton<WorkspaceService>();
 builder.Services.AddSingleton<ProjectPlanService>();
+builder.Services.AddSingleton<JobCancellationRegistry>();
 builder.Services.AddSingleton<AgentToolExecutor>();
 builder.Services.AddHttpClient<RemoteModelClient>(client => client.Timeout = TimeSpan.FromMinutes(5));
 builder.Services.AddHttpClient<AgentRuntimeClient>(client => client.Timeout = TimeSpan.FromMinutes(15));
