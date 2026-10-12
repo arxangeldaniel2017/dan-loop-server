@@ -86,7 +86,7 @@
                         <form asp-controller="GitHub" asp-action="SetProjectRepositories" method="post" class="repository-map">
                             <input type="hidden" name="projectId" value="@project.Id"/><input type="hidden" name="connectionId" value="@connection.Id"/><input type="hidden" name="returnUrl" value="/Account/Connections#git"/>
                             <strong>@project.Name repositories</strong>
-                            <div class="repository-options">@foreach (var repository in connection.Repositories) { <label class="check"><input type="checkbox" name="repositoryIds" value="@repository.Id" checked="@(selected.Contains(repository.Id))"/> @repository.FullName <small>@(repository.IsPrivate ? "private" : "public")</small></label> }</div>
+                            <div class="repository-options">@foreach (var repository in connection.Repositories) { <label class="check"><input type="checkbox" name="repositoryIds" value="@repository.Id" checked="@(selected.Contains(repository.Id))"/><span>@repository.FullName</span><small>@(repository.IsPrivate ? "private" : "public")</small></label> }</div>
                             <button class="secondary">Save repositories</button>
                         </form>
                     }

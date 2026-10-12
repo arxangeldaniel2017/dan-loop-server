@@ -448,12 +448,22 @@ document.addEventListener('submit', async event => {
     if (!response.ok) throw new Error(`The action could not be completed (${response.status}).`);
     let nextDocument = new DOMParser().parseFromString(html, 'text/html');
     let nextWorkspace = nextDocument.querySelector(`[data-connection-workspace="${CSS.escape(workspaceName)}"]`);
+    const responseUrl = new URL(response.url, location.origin);
+    if (!nextWorkspace && ['/account/setup', '/account/login'].includes(responseUrl.pathname.toLowerCase())) {
+      location.assign(responseUrl.href);
+      return;
+    }
     if (!nextWorkspace) {
       const refreshUrl = workspaceName === 'wizard' ? '/Account/Connections' : '/';
       const refreshResponse = await fetch(refreshUrl, { credentials: 'same-origin', cache: 'no-store' });
       if (!refreshResponse.ok) throw new Error('The updated connection details could not be loaded.');
       nextDocument = new DOMParser().parseFromString(await refreshResponse.text(), 'text/html');
       nextWorkspace = nextDocument.querySelector(`[data-connection-workspace="${CSS.escape(workspaceName)}"]`);
+      const refreshResponseUrl = new URL(refreshResponse.url, location.origin);
+      if (!nextWorkspace && ['/account/setup', '/account/login'].includes(refreshResponseUrl.pathname.toLowerCase())) {
+        location.assign(refreshResponseUrl.href);
+        return;
+      }
     }
     if (!nextWorkspace) throw new Error('The updated connection details could not be loaded.');
     const notice = nextDocument.querySelector('[data-auto-dismiss-notice] span')?.textContent?.trim();
