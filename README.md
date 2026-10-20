@@ -10,6 +10,8 @@ docker compose up --build
 
 Open <http://localhost:8080>. On first visit, create the required administrator account, then optionally create a project and configure connections. Both optional steps can be skipped and completed later. Application state, encryption keys and encrypted remote-model credentials persist in the `dan-loop-data` Docker volume.
 
+AI, Git-provider, and cloud object-storage connections are optional and independent. The server starts without them, uses a connection only when one has been saved and enabled or linked for the relevant operation, and otherwise keeps project files in local storage. Missing optional connections never prevent the web service from starting.
+
 When no managed database is configured, the server automatically creates a local SQLite database at `data/dan-loop.db` (or `/data/dan-loop.db` in Docker). Existing `state.json` data is imported automatically when the database is first created.
 
 To use managed PostgreSQL or MySQL, attach the database to the app and set one of these application-platform variables. The provider is detected from the URL or provider-specific variable name:
@@ -58,7 +60,7 @@ For a public deployment, keep the application controls enabled and also configur
 
 ## Remote models
 
-The server loads its provider/model defaults from `Data/ai-connections.json` and copies the catalog into SQLite or the configured managed database at startup. Add or update catalog entries in that JSON file when providers change; saved user connections and capability choices remain separate.
+When present, the server loads provider/model defaults from `Data/ai-connections.json` and copies the catalog into SQLite or the configured managed database at startup. If the catalog is absent, the server starts without provider defaults; saved user connections and capability choices remain separate.
 
 Each AI connection can be assigned Planner, Coder, Orchestrator, Tool calling, Generator, Image, Audio, Video, and Files capabilities. Jobs select enabled connections by capability and priority. A failed connection is recorded and the job is re-queued with the next eligible connection. When the user has not selected any capabilities, the catalog defaults (or safe model-name inference for custom models) are used.
 

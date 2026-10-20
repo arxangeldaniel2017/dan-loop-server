@@ -10,7 +10,12 @@ public sealed class AiConnectionCatalogService(StateStore store, IWebHostEnviron
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(_path)) throw new FileNotFoundException("AI connection catalog is missing.", _path);
+        if (!File.Exists(_path))
+        {
+            await store.UpdateAsync(state => { state.AiProviderCatalog = []; return true; });
+            logger.LogInformation("AI provider catalog was not found at {Path}; starting without AI provider defaults. Optional integrations will be used only when they are configured", _path);
+            return;
+        }
         await using var stream = File.OpenRead(_path);
         var catalog = await JsonSerializer.DeserializeAsync<List<AiProviderCatalogItem>>(stream,
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true }, cancellationToken) ?? [];

@@ -41,7 +41,10 @@ public sealed class WorkspaceService(IConfiguration configuration, StateStore st
         var stateView = await store.ReadAsync(state => new
         {
             Conversations = state.Conversations.Where(x => x.ProjectId == project.Id).OrderByDescending(x => x.UpdatedAt).ToList(),
-            CanPublish = state.AgentRuntime.Settings.AllowGitHubPublish && state.ProjectRepositories.Any(link => link.ProjectId == project.Id)
+            CanPublish = state.AgentRuntime.Settings.AllowGitHubPublish && state.ProjectRepositories.Any(link =>
+                link.ProjectId == project.Id && state.GitHubConnections.Any(connection =>
+                    connection.Id == link.GitHubConnectionId &&
+                    connection.Repositories.Any(repository => repository.Id == link.RepositoryId)))
         });
         return new FileManagerViewModel { Project = project, Path = normalized, Entries = entries, Conversations = stateView.Conversations, CanPublishToGitHub = stateView.CanPublish };
     }

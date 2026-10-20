@@ -64,7 +64,11 @@ public sealed class GitHubSyncWorker(
         var due = await store.ReadAsync(state =>
         {
             if (!state.AgentRuntime.Settings.AllowGitHubPublish) return [];
-            var linkedProjects = state.ProjectRepositories.Select(link => link.ProjectId).ToHashSet();
+            var linkedProjects = state.ProjectRepositories
+                .Where(link => state.GitHubConnections.Any(connection =>
+                    connection.Id == link.GitHubConnectionId &&
+                    connection.Repositories.Any(repository => repository.Id == link.RepositoryId)))
+                .Select(link => link.ProjectId).ToHashSet();
             return state.Projects
                 .Where(project => linkedProjects.Contains(project.Id) && project.AutoPublishPendingPaths.Count > 0)
                 .Where(project => project.NextAutoPublishAttemptAt is null || project.NextAutoPublishAttemptAt <= now)

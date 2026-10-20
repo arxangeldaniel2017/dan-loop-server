@@ -16,17 +16,19 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Data/ai-connections.json" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Data/ai-models-expanded.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <ItemGroup>
     <!-- Runtime project workspaces may contain complete source trees. They must never
          participate in the control-plane build or be copied into published output. -->
     <Compile Remove="data/**" />
     <Content Remove="data/**" />
     <EmbeddedResource Remove="data/**" />
     <None Remove="data/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Re-include the two application catalogs after excluding runtime data. Linux
+         paths are case-sensitive, so these paths must match the repository exactly. -->
+    <Content Include="data/ai-connections.json" TargetPath="Data/ai-connections.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="data/ai-models-expanded.json" TargetPath="Data/ai-models-expanded.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
