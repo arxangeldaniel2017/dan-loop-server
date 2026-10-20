@@ -50,6 +50,8 @@ public sealed class AccountController(StateStore store, PasswordService password
 
         if (string.IsNullOrWhiteSpace(name)) ModelState.AddModelError("", "Model name is required.");
         if (string.IsNullOrWhiteSpace(modelId)) ModelState.AddModelError("", "Model ID is required.");
+        if (AiAuthenticationTypes.Normalize(authenticationType) != AiAuthenticationTypes.None && string.IsNullOrWhiteSpace(apiKey))
+            ModelState.AddModelError("", "API credential is required.");
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             ModelState.AddModelError("", "A valid HTTP(S) model URL is required.");
         if (!ModelState.IsValid)

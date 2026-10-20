@@ -406,23 +406,25 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
-    public async Task<IActionResult> CreateModel(string name, string baseUrl, string modelId, string apiKey, string? providerId, List<string>? capabilities, string? authenticationType, string? apiKeyHeaderName, int priority = 100, bool isEnabled = false)
+    public async Task<IActionResult> CreateModel(string name, string baseUrl, string modelId, string? apiKey, string? providerId, List<string>? capabilities, string? authenticationType, string? apiKeyHeaderName, int priority = 100, bool isEnabled = false)
     {
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return Back("A valid HTTP(S) base URL is required.");
-        await store.UpdateAsync(state =>
+        var added = await store.UpdateAsync(state =>
         {
             var provider = string.IsNullOrWhiteSpace(providerId) ? "custom" : providerId.Trim();
             var suggested = AiConnectionCatalogService.SuggestedCapabilities(state.AiProviderCatalog, provider, modelId.Trim());
             var model = new RemoteModel
             {
                 Name = name.Trim(), ProviderId = provider, BaseUrl = baseUrl.TrimEnd('/'), ModelId = modelId.Trim(),
-                ProtectedApiKey = modelClient.ProtectKey(apiKey), IsEnabled = isEnabled, Priority = Math.Clamp(priority, 1, 999),
+                ProtectedApiKey = modelClient.ProtectKey(apiKey ?? ""), IsEnabled = isEnabled, Priority = Math.Clamp(priority, 1, 999),
                 Capabilities = AiConnectionCatalogService.NormalizeSelectedCapabilities(state.AiProviderCatalog, provider, modelId.Trim(), capabilities), SuggestedCapabilities = suggested
             };
             AiConnectionCatalogService.ApplyProviderAuthentication(state.AiProviderCatalog, model, authenticationType, apiKeyHeaderName);
+            if (model.AuthenticationType != AiAuthenticationTypes.None && string.IsNullOrWhiteSpace(apiKey)) return false;
             state.Models.Add(model);
             return true;
         });
+        if (!added) return Connections("API credential is required for this AI connection.");
         return Connections("AI connection added.");
     }
 
@@ -430,9 +432,10 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     public async Task<IActionResult> UpdateModel(Guid id, string name, string baseUrl, string modelId, string? apiKey, string? providerId, string? authenticationType, string? apiKeyHeaderName, int priority = 100)
     {
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return Connections("A valid HTTP(S) base URL is required.");
-        await store.UpdateAsync(state =>
+        var updated = await store.UpdateAsync(state =>
         {
             var model = state.Models.First(item => item.Id == id);
+            if (model.AuthenticationType != AiAuthenticationTypes.None && string.IsNullOrWhiteSpace(model.ProtectedApiKey) && string.IsNullOrWhiteSpace(apiKey)) return false;
             model.Name = name.Trim(); model.ProviderId = providerId?.Trim() ?? "custom"; model.BaseUrl = baseUrl.TrimEnd('/');
             model.ModelId = modelId.Trim(); model.Priority = Math.Clamp(priority, 1, 999);
             if (!string.IsNullOrWhiteSpace(apiKey)) model.ProtectedApiKey = modelClient.ProtectKey(apiKey);
@@ -441,6 +444,7 @@ public sealed class ManageController(StateStore store, PasswordService passwords
             AiConnectionCatalogService.ApplyProviderAuthentication(state.AiProviderCatalog, model, authenticationType, apiKeyHeaderName);
             return true;
         });
+        if (!updated) return Connections("Enter a new API credential before saving this connection.");
         return Connections("AI connection updated.");
     }
 
@@ -470,8 +474,15 @@ public sealed class ManageController(StateStore store, PasswordService passwords
     }
 
     [HttpPost, ValidateAntiForgeryToken, Authorize(Roles = Roles.Admin)]
-    public async Task<IActionResult> TestModel(Guid id, CancellationToken cancellationToken)
+    public async Task<IActionResult> TestModel(Guid id, string? apiKey, CancellationToken cancellationToken)
     {
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            await store.UpdateAsync(state =>
+            {
+                var current = state.Models.First(item => item.Id == id);
+                current.ProtectedApiKey = modelClient.ProtectKey(apiKey);
+                return true;
+            });
         var model = await store.ReadAsync(state => state.Models.First(item => item.Id == id));
         try
         {

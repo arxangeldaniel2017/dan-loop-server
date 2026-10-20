@@ -25,10 +25,13 @@ public sealed class RemoteModelClient(HttpClient http, IDataProtectionProvider p
     public async Task<string> TestAsync(RemoteModel model, CancellationToken cancellationToken)
     {
         if (model.ApiProtocol == AiApiProtocols.NativeGeneration) return await generation.TestAsync(model, cancellationToken);
+        var apiKey = RevealKey(model);
+        if (model.AuthenticationType != AiAuthenticationTypes.None && string.IsNullOrWhiteSpace(apiKey))
+            throw new InvalidOperationException("No API credential is saved for this connection. Enter a new credential and test again.");
         if (AnthropicProtocol.Handles(model))
         {
             var messages = new object[] { new { role = "user", content = "Reply with OK." } };
-            using var anthropicRequest = AnthropicProtocol.CreateRequest(model, RevealKey(model), messages, null, null, 12);
+            using var anthropicRequest = AnthropicProtocol.CreateRequest(model, apiKey, messages, null, null, 12);
             using var anthropicResponse = await http.SendAsync(anthropicRequest, cancellationToken);
             var anthropicBody = await anthropicResponse.Content.ReadAsStringAsync(cancellationToken);
             EnsureSuccess(anthropicResponse, anthropicBody);
@@ -36,7 +39,7 @@ public sealed class RemoteModelClient(HttpClient http, IDataProtectionProvider p
             return "Connection and native Anthropic model request succeeded.";
         }
         using var request = new HttpRequestMessage(HttpMethod.Post, model.BaseUrl.TrimEnd('/') + "/chat/completions");
-        AiRequestAuthentication.Apply(request, model, string.IsNullOrEmpty(model.ProtectedApiKey) ? "" : _protector.Unprotect(model.ProtectedApiKey));
+        AiRequestAuthentication.Apply(request, model, apiKey);
         request.Content = JsonContent.Create(new
         {
             model = model.ModelId,
