@@ -1,0 +1,34 @@
+/* Responsive corrections kept separate from the compact base stylesheet. */
+.plan-board-head > div,
+.plan-step-badges {
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .plan-board-head {
+    flex-wrap: wrap;
+  }
+
+  .plan-board-head > div {
+    flex: 1 1 220px;
+  }
+
+  .plan-step > summary {
+    grid-template-columns: 34px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .plan-step > summary > .plan-step-badges {
+    grid-column: 2;
+    justify-self: start;
+    justify-content: flex-start;
+  }
+
+  .plan-step.manageable > summary {
+    grid-template-columns: 22px 34px minmax(0, 1fr);
+  }
+
+  .plan-step.manageable > summary > .plan-step-badges {
+    grid-column: 3;
+  }
+}
