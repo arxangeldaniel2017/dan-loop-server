@@ -35,6 +35,8 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
         {
             await using var connection = CreateConnection();
             await connection.OpenAsync();
+            var relational = CreateRelationalPersistence();
+            await relational.EnsureSchemaAsync(connection);
             await using (var create = connection.CreateCommand())
             {
                 create.CommandText = _managedDatabase?.Provider == DatabaseProvider.MySql
@@ -43,9 +45,19 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                 await create.ExecuteNonQueryAsync();
             }
 
-            await using var select = connection.CreateCommand();
-            select.CommandText = "SELECT state_json FROM app_state WHERE id = 1";
-            var json = await select.ExecuteScalarAsync() as string;
+            string? json;
+            var loadedFromRelationalTables = await relational.HasStateAsync(connection);
+            if (loadedFromRelationalTables)
+            {
+                _state = await relational.LoadAsync(connection);
+                json = JsonSerializer.Serialize(_state, JsonOptions());
+            }
+            else
+            {
+                await using var select = connection.CreateCommand();
+                select.CommandText = "SELECT state_json FROM app_state WHERE id = 1";
+                json = await select.ExecuteScalarAsync() as string;
+            }
             if (!string.IsNullOrWhiteSpace(json))
             {
                 _state = JsonSerializer.Deserialize<AppState>(json, JsonOptions()) ?? new();
@@ -282,6 +294,8 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
                     _state.Version = 23;
                 }
                 await SaveUnsafeAsync();
+                if (!loadedFromRelationalTables)
+                    logger.LogInformation("Migrated legacy app_state JSON into relational domain tables");
                 return;
             }
 
@@ -323,18 +337,11 @@ public sealed class StateStore(IConfiguration configuration, ILogger<StateStore>
     {
         await using var connection = CreateConnection();
         await connection.OpenAsync();
-        await using var command = connection.CreateCommand();
-        command.CommandText = _managedDatabase?.Provider == DatabaseProvider.MySql
-            ? "INSERT INTO app_state (id, state_json) VALUES (1, @state) " +
-              "ON DUPLICATE KEY UPDATE state_json = @state"
-            : "INSERT INTO app_state (id, state_json) VALUES (1, @state) " +
-              "ON CONFLICT (id) DO UPDATE SET state_json = EXCLUDED.state_json";
-        var parameter = command.CreateParameter();
-        parameter.ParameterName = "@state";
-        parameter.Value = JsonSerializer.Serialize(_state, JsonOptions());
-        command.Parameters.Add(parameter);
-        await command.ExecuteNonQueryAsync();
+        await CreateRelationalPersistence().SaveAsync(connection, _state);
     }
+
+    private RelationalStatePersistence CreateRelationalPersistence() =>
+        new(_managedDatabase?.Provider == DatabaseProvider.MySql, JsonOptions());
 
     public static string ProjectRepositoryFolder(Project project)
     {

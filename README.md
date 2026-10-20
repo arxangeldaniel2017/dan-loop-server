@@ -12,7 +12,7 @@ Open <http://localhost:8080>. On first visit, create the required administrator 
 
 AI, Git-provider, and cloud object-storage connections are optional and independent. The server starts without them, uses a connection only when one has been saved and enabled or linked for the relevant operation, and otherwise keeps project files in local storage. Missing optional connections never prevent the web service from starting.
 
-When no managed database is configured, the server automatically creates a local SQLite database at `data/dan-loop.db` (or `/data/dan-loop.db` in Docker). Existing `state.json` data is imported automatically when the database is first created.
+When no managed database is configured, the server automatically creates a local SQLite database at `data/dan-loop.db` (or `/data/dan-loop.db` in Docker). Application data is stored in relational domain tables for users, projects, loops, jobs, connections, conversations, execution plans, and their child records. Existing `state.json` files and the former single-row `app_state.state_json` format are imported automatically. The legacy `app_state` row is retained as a migration backup but is no longer updated after a successful import.
 
 To use managed PostgreSQL or MySQL, attach the database to the app and set one of these application-platform variables. The provider is detected from the URL or provider-specific variable name:
 
