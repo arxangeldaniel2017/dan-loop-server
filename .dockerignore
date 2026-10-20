@@ -2,5 +2,7 @@
 **/obj
 .git
 .gitignore
-data
+data/*
+!data/ai-connections.json
+!data/ai-models-expanded.json
 README.md
